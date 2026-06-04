@@ -17,13 +17,19 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardHeader, CardTitle, Badge, Button, EmptyState } from '@/components/ui';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useMockSttStream } from '@/lib/mockStt';
+import { useWsSttStream } from '@/lib/wsStt';
+import { isEnabled } from '@/lib/featureFlags';
 import { MOCK_RECENT_SESSIONS, DEMO_SPEAKERS } from '@/lib/mock-data';
 import { formatDuration, formatMinutes } from '@/lib/format';
 import { ROLE_STYLES, ROLE_LABEL } from '@/lib/speakerStyles';
 import { cn } from '@/lib/cn';
 
+const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
+
 export function Sessions() {
   const { t } = useTranslation();
+  const useBackend = isEnabled('useBackendStt');
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const lifecycle = useSessionStore((s) => s.lifecycle);
   const currentCase = useSessionStore((s) => s.currentCase);
   const elapsedSec = useSessionStore((s) => s.elapsedSec);
@@ -34,8 +40,10 @@ export function Sessions() {
   const isLive = lifecycle === 'live' || lifecycle === 'starting';
   const isStopping = lifecycle === 'stopping';
 
-  // Drive mock STT while session is in flight
-  useMockSttStream(isLive);
+  // Drive STT while session is in flight. We always call BOTH hooks (rules of hooks)
+  // but only the active one receives `isLive = true`.
+  useMockSttStream(useBackend ? false : isLive);
+  useWsSttStream(useBackend ? isLive : false, sessionId);
 
   // Tick elapsed time
   useEffect(() => {
@@ -56,20 +64,55 @@ export function Sessions() {
     }
   }, [lifecycle]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const seed = MOCK_RECENT_SESSIONS.find((s) => s.status === 'live')!;
     useSessionStore.getState().start({
       caseNumber: seed.caseNumber,
       title: seed.title,
       judge: seed.judge,
     });
-    // Pre-seed known speakers
+    // Pre-seed known speakers (idempotent on the server too)
     for (const sp of DEMO_SPEAKERS) {
       useSessionStore.getState().registerSpeaker(sp.id, sp.label, sp.role);
     }
+
+    if (useBackend) {
+      try {
+        const r = await fetch(`${API_BASE}/api/sessions/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            caseNumber: seed.caseNumber,
+            title: seed.title,
+            judge: seed.judge,
+            speakers: DEMO_SPEAKERS,
+          }),
+        });
+        if (!r.ok) {
+          // eslint-disable-next-line no-console
+          console.warn('[sessions] start failed', r.status);
+          return;
+        }
+        const data = await r.json();
+        setSessionId(data.sessionId);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[sessions] start network error', e);
+      }
+    }
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
+    if (useBackend && sessionId) {
+      try {
+        await fetch(`${API_BASE}/api/sessions/${sessionId}/stop`, {
+          method: 'POST',
+        });
+      } catch {
+        /* best-effort; the session is being torn down regardless */
+      }
+      setSessionId(null);
+    }
     useSessionStore.getState().stop();
   };
 
