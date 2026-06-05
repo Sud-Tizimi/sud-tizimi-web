@@ -4,8 +4,8 @@ import {
   LayoutDashboard,
   Scale,
   Radio,
-  // CP2 FEATURE — ENABLE AFTER CHECKPOINT 1
   FileText,
+  // CP2 FEATURE — ENABLE AFTER CHECKPOINT 1
   Sparkles,
   Bell,
   Settings as SettingsIcon,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { ENABLED_FEATURES } from '@/lib/featureFlags';
+import { UserMenu } from './UserMenu';
 
 interface NavItem {
   to: string;
@@ -24,10 +25,10 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard, flag: 'dashboard' },
   { to: '/cases', labelKey: 'nav.cases', icon: Scale, flag: 'cases' },
+  { to: '/documents', labelKey: 'nav.documents', icon: FileText, flag: 'documentsLibrary' },
   { to: '/sessions', labelKey: 'nav.sessions', icon: Radio, flag: 'sessions' },
 
   // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
-  // { to: '/documents', labelKey: 'nav.documents', icon: FileText, flag: 'documents' },
   // { to: '/ai', labelKey: 'nav.ai', icon: Sparkles, flag: 'aiSummary' },
   // { to: '/notifications', labelKey: 'nav.notifications', icon: Bell, flag: 'notifications' },
   // { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon, flag: 'settings' },
@@ -51,7 +52,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Nav — CP1 only. CP2 items are commented above and restored on Checkpoint 2. */}
+      {/* Nav — CP1 only. CP2 items are commented above and restored on Checkpoint 2 / Phase B. */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <ul className="flex flex-col gap-1">
           {visibleItems.map(({ to, labelKey, icon: Icon }) => (
@@ -83,23 +84,15 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* User footer */}
+      {/* User footer — real authed user (Phase A) */}
       <div className="p-3 border-t border-white/5">
-        <div className="flex items-center gap-3 px-2 py-2 rounded-md">
-          <div className="h-9 w-9 rounded-full bg-primary-500/20 text-primary-100 inline-flex items-center justify-center text-body-md font-semibold">
-            RK
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-body-md font-medium truncate">Rustam Karimov</p>
-            <p className="text-caption text-white/50 truncate">Judge • Tashkent</p>
-          </div>
-        </div>
+        <UserMenu variant="sidebar" />
       </div>
     </aside>
   );
 }
 
-// CP2 FEATURE — ENABLE AFTER CHECKPOINT 1
+// CP2 FEATURE — ENABLE AFTER CHECKPOINT 1 / Phase B
 // `FileText`, `Sparkles`, `Bell`, `SettingsIcon` icons reserved for CP2 nav.
 // Imported above to keep tree-shakable imports in one place.
 void FileText;

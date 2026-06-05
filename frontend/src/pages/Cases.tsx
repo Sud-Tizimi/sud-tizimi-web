@@ -1,144 +1,184 @@
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Scale, Gavel, Calendar, Plus, FileText } from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
+import { Scale, FileSignature, Gavel, Plus, Inbox } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Card, CardHeader, CardTitle, Badge, Button, EmptyState } from '@/components/ui';
-import { MOCK_CASES, type CaseRow } from '@/lib/mock-data';
-import { format, parseISO } from 'date-fns';
+import { Card, CardHeader, CardTitle, CardDescription, Button, Badge, EmptyState } from '@/components/ui';
+import { useCases, useJudges, useAssistants } from '@/hooks/queries';
+import { useAuth } from '@/hooks/useAuth';
+import { CASE_STATUS_BADGE } from '@/lib/caseStyles';
 import { cn } from '@/lib/cn';
+import type { Case, CaseStatus } from '@/types/domain';
 
-const STATUS_STYLES: Record<CaseRow['status'], { variant: 'success' | 'warning' | 'info' | 'neutral'; labelKey: string }> = {
-  open: { variant: 'info', labelKey: 'case.status.open' },
-  in_hearing: { variant: 'warning', labelKey: 'case.status.inHearing' },
-  adjourned: { variant: 'neutral', labelKey: 'case.status.adjourned' },
-  closed: { variant: 'success', labelKey: 'case.status.closed' },
+type StatusFilter = 'all' | CaseStatus;
+
+const STATUS_FILTER_KEYS: Record<StatusFilter, string> = {
+  all: 'caseMgmt.list.filterAll',
+  draft: 'caseStatus.draft',
+  uploaded: 'caseStatus.uploaded',
+  under_review: 'caseStatus.under_review',
+  approved: 'caseStatus.approved',
+  returned: 'caseStatus.returned',
 };
 
 export function Cases() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { role } = useAuth();
+  const { data: cases = [], isLoading } = useCases();
+  const { data: judges = [] } = useJudges();
+  const { data: assistants = [] } = useAssistants();
+  const [filter, setFilter] = useState<StatusFilter>('all');
 
-  const inHearing = MOCK_CASES.filter((c) => c.status === 'in_hearing').length;
-  const total = MOCK_CASES.length;
+  // Server already scopes (judges see their assigned, assistants see their own),
+  // so we don't re-filter by user id — we just apply the status chip filter.
+  const filtered = useMemo(() => {
+    let next = cases;
+    if (filter !== 'all') {
+      next = next.filter((c) => c.status === filter);
+    }
+    return next;
+  }, [cases, filter]);
+
+  // Doc count per case — Phase A doesn't expose /api/cases/{id}/documents
+  // yet. We show the seeded 12 docs distributed as in the mock for the demo;
+  // Phase B will replace this with a real count.
+  const docCount = (caseId: string) => SEEDED_DOC_COUNTS[caseId] ?? 0;
+
+  const filterOptions: StatusFilter[] = [
+    'all',
+    'draft',
+    'uploaded',
+    'under_review',
+    'returned',
+    'approved',
+  ];
+
+  const judgeName = (id: string) => judges.find((j) => j.id === id)?.fullName ?? id;
+  const assistantName = (id: string) =>
+    assistants.find((a) => a.id === id)?.fullName ?? id;
 
   return (
     <div className="p-6 md:p-8 max-w-screen-2xl">
       <PageHeader
-        title={t('nav.cases')}
-        subtitle="All cases scheduled for hearing. Filters and analytics coming in Checkpoint 2."
+        title={t('caseMgmt.list.title')}
+        subtitle={t('caseMgmt.list.subtitle')}
         actions={
-          <Button
-            size="md"
-            variant="secondary"
-            leftIcon={<Plus className="h-4 w-4" />}
-            disabled
-            title="Available in Checkpoint 2"
-          >
-            New Case
-          </Button>
+          role === 'assistant' ? (
+            <Button
+              size="md"
+              leftIcon={<Plus className="h-4 w-4" />}
+              onClick={() => navigate('/cases/new')}
+            >
+              {t('caseMgmt.list.newCase')}
+            </Button>
+          ) : null
         }
       />
 
-      {/* Lightweight summary — no analytics, just orientation */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <SummaryTile
-          icon={<Scale className="h-5 w-5" />}
-          label="Total cases"
-          value={`${total}`}
-        />
-        <SummaryTile
-          icon={<Gavel className="h-5 w-5" />}
-          label="In hearing now"
-          value={`${inHearing}`}
-        />
+      {/* Status filter chips */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <span className="text-mono text-ink-muted mr-2">
+          {t('caseMgmt.list.filterStatus')}
+        </span>
+        {filterOptions.map((opt) => {
+          const active = filter === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => setFilter(opt)}
+              className={cn(
+                'inline-flex items-center h-8 px-3 rounded-full border text-caption font-medium transition-colors',
+                active
+                  ? 'bg-primary-500 text-white border-primary-500'
+                  : 'bg-white text-ink-muted border-outline-soft hover:border-outline hover:text-ink',
+              )}
+            >
+              {t(STATUS_FILTER_KEYS[opt])}
+            </button>
+          );
+        })}
       </div>
 
-      <Card padding="md">
-        <CardHeader>
+      <Card padding="none">
+        <CardHeader className="px-6 pt-6">
           <div>
-            <CardTitle>All Cases</CardTitle>
-            <p className="text-body-md text-ink-muted mt-0.5">{total} records</p>
+            <CardTitle>{t('caseMgmt.list.filterMine')}</CardTitle>
+            <CardDescription>
+              {isLoading
+                ? t('common.loading')
+                : filtered.length === 1
+                  ? `1 ${t('caseMgmt.list.subtitle').toLowerCase()}`
+                  : `${filtered.length} ${t('caseMgmt.list.subtitle').toLowerCase()}`}
+            </CardDescription>
           </div>
         </CardHeader>
 
-        {MOCK_CASES.length === 0 ? (
+        {filtered.length === 0 && !isLoading ? (
           <EmptyState
-            icon={<FileText className="h-5 w-5" />}
-            title="No cases"
-            description="No cases have been filed yet."
+            className="py-16"
+            icon={<Inbox className="h-5 w-5" />}
+            title={
+              role === 'judge' ? t('caseMgmt.list.emptyJudge') : t('caseMgmt.list.emptyAssistant')
+            }
+            description={t('caseMgmt.list.subtitle')}
+            action={
+              role === 'assistant' ? (
+                <Button
+                  size="md"
+                  leftIcon={<Plus className="h-4 w-4" />}
+                  onClick={() => navigate('/cases/new')}
+                >
+                  {t('caseMgmt.list.newCase')}
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
-          <div className="overflow-x-auto -mx-6">
+          <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-outline-soft">
                   <th className="text-left text-mono text-ink-muted h-10 px-6 font-medium">
-                    Case
-                  </th>
-                  <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium hidden md:table-cell">
-                    Parties
-                  </th>
-                  <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium hidden lg:table-cell">
-                    Judge
+                    {t('caseMgmt.list.columns.case')}
                   </th>
                   <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium hidden sm:table-cell">
-                    Hearing
+                    {t('caseMgmt.list.columns.citizen')}
+                  </th>
+                  <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium hidden md:table-cell">
+                    {role === 'judge'
+                      ? t('caseMgmt.list.columns.assistant')
+                      : t('caseMgmt.list.columns.judge')}
+                  </th>
+                  <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium hidden lg:table-cell">
+                    {t('caseMgmt.list.columns.documents')}
                   </th>
                   <th className="text-left text-mono text-ink-muted h-10 px-3 font-medium">
-                    Status
+                    {t('caseMgmt.list.columns.status')}
+                  </th>
+                  <th className="text-right text-mono text-ink-muted h-10 px-6 font-medium hidden sm:table-cell">
+                    {t('caseMgmt.list.columns.updated')}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {MOCK_CASES.map((c) => {
-                  const style = STATUS_STYLES[c.status];
-                  const hearing = safeFormat(c.hearingDate);
-                  return (
-                    <tr
-                      key={c.id}
-                      onClick={() => navigate('/sessions')}
-                      className="border-b border-outline-soft last:border-0 hover:bg-surface-container-low transition-colors cursor-pointer"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-start gap-3 min-w-0">
-                          <div
-                            className={cn(
-                              'h-9 w-9 rounded-md inline-flex items-center justify-center shrink-0',
-                              c.status === 'in_hearing'
-                                ? 'bg-error-container text-error'
-                                : 'bg-primary-50 text-primary-500',
-                            )}
-                          >
-                            <Scale className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-body-md font-medium text-ink truncate">{c.title}</p>
-                            <p className="text-caption font-mono text-ink-muted">{c.caseNumber}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-4 text-body-md text-ink-muted hidden md:table-cell">
-                        {c.parties}
-                      </td>
-                      <td className="px-3 py-4 text-body-md text-ink-muted hidden lg:table-cell">
-                        {c.judge}
-                      </td>
-                      <td className="px-3 py-4 hidden sm:table-cell">
-                        {hearing ? (
-                          <div className="flex items-center gap-1.5 text-body-md text-ink">
-                            <Calendar className="h-3.5 w-3.5 text-ink-muted" />
-                            <span className="font-mono tabular-nums">{hearing}</span>
-                          </div>
-                        ) : (
-                          <span className="text-ink-muted">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-4">
-                        <Badge variant={style.variant}>{t(style.labelKey)}</Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filtered.map((c) => (
+                  <CaseRow
+                    key={c.id}
+                    caseItem={c}
+                    documentsCount={docCount(c.id)}
+                    role={role}
+                    judgeLabel={
+                      role === 'assistant' ? judgeName(c.assignedJudgeId) : undefined
+                    }
+                    assistantLabel={
+                      role === 'judge' ? assistantName(c.assistantId) : undefined
+                    }
+                    onOpen={() => navigate(`/cases/${c.id}`)}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -148,24 +188,96 @@ export function Cases() {
   );
 }
 
-function SummaryTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function CaseRow({
+  caseItem,
+  documentsCount,
+  role,
+  judgeLabel,
+  assistantLabel,
+  onOpen,
+}: {
+  caseItem: Case;
+  documentsCount: number;
+  role: 'judge' | 'assistant' | undefined;
+  judgeLabel?: string;
+  assistantLabel?: string;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation();
+  const status = caseItem.status;
+  const badge = CASE_STATUS_BADGE[status];
+
   return (
-    <div className="bg-white border border-outline-soft rounded-lg p-4 flex items-center gap-3">
-      <span className="h-10 w-10 rounded-md bg-primary-50 text-primary-500 inline-flex items-center justify-center">
-        {icon}
-      </span>
-      <div>
-        <p className="text-mono text-ink-muted">{label}</p>
-        <p className="text-headline-md text-ink tabular-nums">{value}</p>
-      </div>
-    </div>
+    <tr
+      onClick={onOpen}
+      className="border-b border-outline-soft last:border-0 hover:bg-surface-container-low transition-colors cursor-pointer"
+    >
+      <td className="px-6 py-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div
+            className={cn(
+              'h-9 w-9 rounded-md inline-flex items-center justify-center shrink-0',
+              status === 'under_review' || status === 'returned'
+                ? 'bg-amber-50 text-amber-700'
+                : 'bg-primary-50 text-primary-500',
+            )}
+          >
+            <Scale className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-body-md font-medium text-ink truncate">{caseItem.citizenName}</p>
+            <p className="text-caption font-mono text-ink-muted">{caseItem.caseNumber}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-4 text-body-md text-ink-muted hidden sm:table-cell">
+        <p className="line-clamp-2 max-w-xs">{caseItem.description}</p>
+      </td>
+      <td className="px-3 py-4 hidden md:table-cell">
+        <div className="flex items-center gap-2 text-body-md text-ink-muted">
+          {role === 'judge' ? (
+            <FileSignature className="h-3.5 w-3.5 text-ink-muted shrink-0" />
+          ) : (
+            <Gavel className="h-3.5 w-3.5 text-ink-muted shrink-0" />
+          )}
+          <span className="truncate">
+            {role === 'judge' ? assistantLabel : judgeLabel}
+          </span>
+        </div>
+      </td>
+      <td className="px-3 py-4 hidden lg:table-cell">
+        <span className="text-body-md text-ink font-mono tabular-nums">
+          {documentsCount}
+        </span>
+        <span className="text-caption text-ink-muted ml-1">
+          {t('caseMgmt.list.columns.documents').toLowerCase()}
+        </span>
+      </td>
+      <td className="px-3 py-4">
+        <Badge variant={badge.variant}>{t(`caseStatus.${status}`)}</Badge>
+      </td>
+      <td className="px-6 py-4 text-right hidden sm:table-cell">
+        <p className="text-body-md text-ink-muted">
+          {formatDistanceToNow(new Date(caseItem.updatedAt), { addSuffix: true, locale: undefined })}
+        </p>
+        <p className="text-caption font-mono text-ink-muted/70">
+          {format(new Date(caseItem.updatedAt), 'yyyy-MM-dd HH:mm', { locale: undefined })}
+        </p>
+      </td>
+    </tr>
   );
 }
 
-function safeFormat(iso: string): string | null {
-  try {
-    return format(parseISO(iso), 'yyyy-MM-dd');
-  } catch {
-    return null;
-  }
-}
+// Mirrors the CASE_DOCUMENT_IDS distribution from the seed migration, so
+// the dashboard / case-list shows realistic per-case counts. Replaced by a
+// real ``/api/cases/{id}/documents`` call in Phase B.
+const SEEDED_DOC_COUNTS: Record<string, number> = {
+  'case-0241': 5,
+  'case-0239': 1,
+  'case-0235': 1,
+  'case-0231': 2,
+  'case-0228': 1,
+  'case-0224': 2,
+  'case-0219': 1,
+  'case-0214': 0,
+};

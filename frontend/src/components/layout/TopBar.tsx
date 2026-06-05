@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next';
-import { Search, Bell, HelpCircle, Activity } from 'lucide-react';
+import { Search, HelpCircle, Activity } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Badge } from '@/components/ui/Badge';
+import { UserMenu } from './UserMenu';
+import { NotificationsBell } from './NotificationsBell';
 import { cn } from '@/lib/cn';
 
 const LANGS: Array<{ code: 'en' | 'uz' | 'ru'; label: string }> = [
@@ -76,23 +78,11 @@ export function TopBar({ systemOnline, uptimeHours }: TopBarProps) {
         ))}
       </div>
 
-      <IconButton icon={<HelpCircle className="h-5 w-5" />} label="Help" />
+      <UserMenu variant="topbar" className="hidden lg:inline-flex" />
 
-      {/* CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
-          <IconButton
-            icon={
-              <span className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-error" />
-              </span>
-            }
-            label={t('common.notifications')}
-          />
-      */}
+      <NotificationsBell />
+
+      <IconButton icon={<HelpCircle className="h-5 w-5" />} label="Help" />
     </header>
   );
 }
-
-// CP2 FEATURE — ENABLE AFTER CHECKPOINT 1
-// `Bell` icon reserved for the notifications entry in CP2.
-void Bell;

@@ -8,10 +8,9 @@
  */
 import { useEffect, useRef } from 'react';
 import { useSessionStore } from '@/stores/sessionStore';
-import { DEMO_SPEAKERS } from '@/lib/mock-data';
 import type { SpeakerRole } from '@/types/domain';
 
-type SpeakerSeed = { id: string; label: string; role: SpeakerRole };
+type SpeakerSeed = { id: string; label?: string; shortLabel?: string; role?: SpeakerRole };
 
 // Server WS endpoint. Vite proxy on /ws → ws://localhost:8000 in dev.
 const WS_BASE: string =
@@ -45,13 +44,7 @@ export function useWsSttStream(active: boolean, sessionId: string | null): void 
       wsRef.current = ws;
 
       ws.onopen = () => {
-        // Idempotent: server treats register_speakers as a no-op for already-known ids
-        ws.send(
-          JSON.stringify({
-            type: 'register_speakers',
-            speakers: DEMO_SPEAKERS as SpeakerSeed[],
-          }),
-        );
+        ws.send(JSON.stringify({ type: 'subscribe_audio_level', enabled: true }));
       };
 
       ws.onmessage = (e) => {
@@ -67,13 +60,18 @@ export function useWsSttStream(active: boolean, sessionId: string | null): void 
         switch (t) {
           case 'session_ready':
             for (const sp of (msg.speakers as SpeakerSeed[]) ?? []) {
-              store.getState().registerSpeaker(sp.id, sp.label, sp.role);
+              store.getState().registerSpeaker(sp.id, sp.label, sp.role, sp.shortLabel);
             }
             break;
           case 'speaker_registered':
             store
               .getState()
-              .registerSpeaker(msg.speaker.id, msg.speaker.label, msg.speaker.role);
+              .registerSpeaker(
+                msg.speaker.id,
+                msg.speaker.label,
+                msg.speaker.role,
+                msg.speaker.shortLabel,
+              );
             break;
           case 'partial':
             store.getState().upsertPartial(msg.speakerId, msg.text, at);

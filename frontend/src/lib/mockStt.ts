@@ -14,18 +14,18 @@ interface Utterance {
  * Times are relative to session start. The whole sequence loops.
  */
 const SCRIPT: Utterance[] = [
-  { speakerId: 'sp-00', text: 'Суд начинается. Прошу всех встать.', startMs: 500 },
-  { speakerId: 'sp-00', text: 'Заседание продолжается. Слушаем истца.', startMs: 4200 },
-  { speakerId: 'sp-01', text: 'Уважаемый суд, позвольте изложить обстоятельства дела.', startMs: 7800 },
-  { speakerId: 'sp-01', text: 'По нашему мнению, решение администрации было принято с нарушением процедуры.', startMs: 13200 },
-  { speakerId: 'sp-00', text: 'Спасибо. Слово предоставляется ответчику.', startMs: 19200 },
-  { speakerId: 'sp-02', text: 'Ваша честь, мы не согласны с позицией истца.', startMs: 22200 },
-  { speakerId: 'sp-02', text: 'Все процедуры были соблюдены в полном объёме, согласно действующему законодательству.', startMs: 26200 },
-  { speakerId: 'sp-03', text: 'Ваша честь, разрешите дополнить позицию стороны истца.', startMs: 32200 },
-  { speakerId: 'sp-00', text: 'Пожалуйста.', startMs: 35200 },
-  { speakerId: 'sp-03', text: 'Согласно статье 117 Гражданского кодекса, наш клиент имеет безусловное право на компенсацию.', startMs: 37200 },
-  { speakerId: 'sp-00', text: 'Суд удаляется на совещание. Прошу всех оставаться на местах.', startMs: 45000 },
-  { speakerId: 'sp-01', text: 'Благодарю, Ваша честь.', startMs: 49200 },
+  { speakerId: 'speaker-1', text: 'Суд начинается. Прошу всех встать.', startMs: 500 },
+  { speakerId: 'speaker-1', text: 'Заседание продолжается. Слушаем первую сторону.', startMs: 4200 },
+  { speakerId: 'speaker-2', text: 'Позвольте изложить обстоятельства дела.', startMs: 7800 },
+  { speakerId: 'speaker-2', text: 'По нашему мнению, решение было принято с нарушением процедуры.', startMs: 13200 },
+  { speakerId: 'speaker-1', text: 'Спасибо. Слово предоставляется второй стороне.', startMs: 19200 },
+  { speakerId: 'speaker-3', text: 'Мы не согласны с представленной позицией.', startMs: 22200 },
+  { speakerId: 'speaker-3', text: 'Все процедуры были соблюдены в полном объёме согласно действующему законодательству.', startMs: 26200 },
+  { speakerId: 'speaker-4', text: 'Разрешите дополнить позицию первой стороны.', startMs: 32200 },
+  { speakerId: 'speaker-1', text: 'Пожалуйста.', startMs: 35200 },
+  { speakerId: 'speaker-4', text: 'Согласно представленным материалам, заявленные требования подлежат рассмотрению.', startMs: 37200 },
+  { speakerId: 'speaker-1', text: 'Объявляется перерыв. Прошу всех оставаться на местах.', startMs: 45000 },
+  { speakerId: 'speaker-2', text: 'Спасибо.', startMs: 49200 },
 ];
 
 const PARTIAL_INTERVAL_MS = 450;
@@ -51,7 +51,7 @@ export function useMockSttStream(active: boolean): void {
 
     // Seed known speakers
     for (const sp of DEMO_SPEAKERS) {
-      store.getState().registerSpeaker(sp.id, sp.label, sp.role);
+      store.getState().registerSpeaker(sp.id, sp.label, sp.role, sp.shortLabel);
     }
 
     const loopStart = () => {

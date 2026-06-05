@@ -48,6 +48,7 @@ class StreamDispatcher:
                 elif isinstance(ev, FinalEvent):
                     await self._handle_final(session, mgr, ev)
                 elif isinstance(ev, SpeakerSpeakingEvent):
+                    await mgr.ensure_speaker(session.id, ev.speaker_id)
                     await mgr.broadcast(
                         session.id,
                         ServerSpeakerSpeaking(
@@ -75,6 +76,7 @@ class StreamDispatcher:
         entry_id = session.partial_index.get(ev.speaker_id) or gen_entry_id(
             ev.speaker_id, ev.at_ms
         )
+        await mgr.ensure_speaker(session.id, ev.speaker_id)
         session.partial_index[ev.speaker_id] = entry_id
         await mgr.broadcast(
             session.id,
@@ -93,6 +95,7 @@ class StreamDispatcher:
         entry_id = session.partial_index.pop(
             ev.speaker_id, gen_entry_id(ev.speaker_id, ev.at_ms)
         )
+        await mgr.ensure_speaker(session.id, ev.speaker_id)
         session.transcript.append(
             {
                 "id": entry_id,

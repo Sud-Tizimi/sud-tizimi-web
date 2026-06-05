@@ -168,12 +168,13 @@ export const MOCK_CASES: CaseRow[] = [
 export interface SpeakerDef {
   id: string;
   label: string;
+  shortLabel: string;
   role: SpeakerRole;
 }
 
 export const DEMO_SPEAKERS: SpeakerDef[] = [
-  { id: 'sp-00', label: 'Hon. R. Karimov', role: 'judge' },
-  { id: 'sp-01', label: 'A. Abdullayev', role: 'plaintiff' },
-  { id: 'sp-02', label: 'Tashkent City Admin', role: 'defendant' },
-  { id: 'sp-03', label: 'L. Tursunov', role: 'lawyer' },
+  { id: 'speaker-1', label: 'Speaker 1', shortLabel: 'SP1', role: 'speaker' },
+  { id: 'speaker-2', label: 'Speaker 2', shortLabel: 'SP2', role: 'speaker' },
+  { id: 'speaker-3', label: 'Speaker 3', shortLabel: 'SP3', role: 'speaker' },
+  { id: 'speaker-4', label: 'Speaker 4', shortLabel: 'SP4', role: 'speaker' },
 ];

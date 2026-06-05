@@ -17,6 +17,7 @@ from ..core.ids import gen_session_id
 from ..core.ws_protocol import (
     ServerAudioLevel,
     ServerMessage,
+    ServerSpeakerRegistered,
     SpeakerSeed,
     make_session_ready,
 )
@@ -84,8 +85,11 @@ class SessionManager:
                 id=sid,
                 case=case_info,
                 started_at=datetime.now(timezone.utc),
-                speakers={s.id: s for s in speakers},
+                speakers={},
             )
+            for seed in speakers:
+                generic = self._generic_speaker_seed(seed.id, sess)
+                sess.speakers[generic.id] = generic
             self._sessions[sid] = sess
 
         # Register speakers with the provider so the script knows who is who.
@@ -192,18 +196,33 @@ class SessionManager:
         sess = await self._get_or_404(sid)
         added: list[SpeakerSeed] = []
         for seed in seeds:
-            existing = sess.speakers.get(seed.id)
-            # Idempotent: don't downgrade a non-unknown role back to "unknown"
-            if existing and existing.role != "unknown" and seed.role == "unknown":
+            generic = self._generic_speaker_seed(seed.id, sess)
+            existing = sess.speakers.get(generic.id)
+            if existing:
                 continue
-            sess.speakers[seed.id] = seed
-            added.append(seed)
+            sess.speakers[generic.id] = generic
+            added.append(generic)
         if added:
             try:
                 await self.provider.register_speakers(sid, added)
             except Exception:
                 log.exception("provider_register_speakers_failed sid=%s", sid)
         return added
+
+    async def ensure_speaker(self, sid: str, speaker_id: str) -> SpeakerSeed:
+        sess = await self._get_or_404(sid)
+        existing = sess.speakers.get(speaker_id)
+        if existing:
+            return existing
+
+        seed = self._generic_speaker_seed(speaker_id, sess)
+        sess.speakers[seed.id] = seed
+        try:
+            await self.provider.register_speakers(sid, [seed])
+        except Exception:
+            log.exception("provider_register_speakers_failed sid=%s", sid)
+        await self.broadcast(sid, ServerSpeakerRegistered(speaker=seed))
+        return seed
 
     # ----------------------- Queries -----------------------
 
@@ -227,3 +246,23 @@ class SessionManager:
             await ws.send_json(msg.model_dump())
         except Exception:
             log.debug("send_failed", exc_info=True)
+
+    @staticmethod
+    def _generic_speaker_seed(speaker_id: str, sess: Session) -> SpeakerSeed:
+        n = _speaker_number_from_id(speaker_id) or (len(sess.speakers) + 1)
+        return SpeakerSeed(
+            id=speaker_id,
+            label=f"Speaker {n}",
+            shortLabel=f"SP{n}",
+            role="speaker",
+        )
+
+
+def _speaker_number_from_id(speaker_id: str) -> int | None:
+    import re
+
+    match = re.search(r"(?:speaker|spk|sp)[-_ ]?0*(\d+)$", speaker_id, re.IGNORECASE)
+    if match is None:
+        return None
+    n = int(match.group(1))
+    return 1 if n == 0 else n

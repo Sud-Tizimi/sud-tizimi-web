@@ -11,13 +11,14 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field
 
-SpeakerRole = Literal["judge", "plaintiff", "defendant", "witness", "lawyer", "unknown"]
+SpeakerRole = Literal["speaker", "unknown"]
 
 
 class SpeakerSeed(BaseModel):
     id: str
-    label: str
-    role: SpeakerRole = "unknown"
+    label: str = ""
+    shortLabel: str = ""
+    role: SpeakerRole = "speaker"
 
 
 # ----------------------- Client → Server -----------------------

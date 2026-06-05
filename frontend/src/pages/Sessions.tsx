@@ -18,17 +18,20 @@ import { Card, CardHeader, CardTitle, Badge, Button, EmptyState } from '@/compon
 import { useSessionStore } from '@/stores/sessionStore';
 import { useMockSttStream } from '@/lib/mockStt';
 import { useWsSttStream } from '@/lib/wsStt';
+import { useBrowserSpeechStt } from '@/lib/browserSpeechStt';
 import { isEnabled } from '@/lib/featureFlags';
 import { MOCK_RECENT_SESSIONS, DEMO_SPEAKERS } from '@/lib/mock-data';
 import { formatDuration, formatMinutes } from '@/lib/format';
-import { ROLE_STYLES, ROLE_LABEL } from '@/lib/speakerStyles';
+import { ROLE_STYLES } from '@/lib/speakerStyles';
 import { cn } from '@/lib/cn';
 
 const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
 
 export function Sessions() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const useBrowserSpeech = isEnabled('useBrowserSpeechStt');
   const useBackend = isEnabled('useBackendStt');
+  const captureMode = useBrowserSpeech ? 'browser' : useBackend ? 'backend' : 'mock';
   const [sessionId, setSessionId] = useState<string | null>(null);
   const lifecycle = useSessionStore((s) => s.lifecycle);
   const currentCase = useSessionStore((s) => s.currentCase);
@@ -40,10 +43,11 @@ export function Sessions() {
   const isLive = lifecycle === 'live' || lifecycle === 'starting';
   const isStopping = lifecycle === 'stopping';
 
-  // Drive STT while session is in flight. We always call BOTH hooks (rules of hooks)
-  // but only the active one receives `isLive = true`.
-  useMockSttStream(useBackend ? false : isLive);
-  useWsSttStream(useBackend ? isLive : false, sessionId);
+  // Drive STT while session is in flight. Hooks are always called (rules of hooks),
+  // but only the active capture mode receives `isLive = true`.
+  useBrowserSpeechStt(captureMode === 'browser' && isLive, i18n.resolvedLanguage ?? i18n.language);
+  useMockSttStream(captureMode === 'mock' && isLive);
+  useWsSttStream(captureMode === 'backend' && isLive, sessionId);
 
   // Tick elapsed time
   useEffect(() => {
@@ -65,18 +69,17 @@ export function Sessions() {
   }, [lifecycle]);
 
   const handleStart = async () => {
-    const seed = MOCK_RECENT_SESSIONS.find((s) => s.status === 'live')!;
     useSessionStore.getState().start({
-      caseNumber: seed.caseNumber,
-      title: seed.title,
-      judge: seed.judge,
+      caseNumber: t('sessions.live.caseNumber'),
+      title: t('sessions.live.title'),
+      judge: t('sessions.live.judge'),
     });
-    // Pre-seed known speakers (idempotent on the server too)
-    for (const sp of DEMO_SPEAKERS) {
-      useSessionStore.getState().registerSpeaker(sp.id, sp.label, sp.role);
-    }
 
-    if (useBackend) {
+    if (captureMode === 'backend') {
+      const seed = MOCK_RECENT_SESSIONS.find((s) => s.status === 'live')!;
+      for (const sp of DEMO_SPEAKERS) {
+        useSessionStore.getState().registerSpeaker(sp.id, sp.label, sp.role, sp.shortLabel);
+      }
       try {
         const r = await fetch(`${API_BASE}/api/sessions/start`, {
           method: 'POST',
@@ -103,7 +106,7 @@ export function Sessions() {
   };
 
   const handleStop = async () => {
-    if (useBackend && sessionId) {
+    if (captureMode === 'backend' && sessionId) {
       try {
         await fetch(`${API_BASE}/api/sessions/${sessionId}/stop`, {
           method: 'POST',
@@ -123,8 +126,8 @@ export function Sessions() {
         subtitle={isLive
           ? currentCase
             ? `${currentCase.caseNumber} · ${currentCase.judge}`
-            : 'Starting…'
-          : 'Real-time transcription and speaker identification'}
+            : t('sessions.status.starting')
+          : t('sessions.subtitle')}
       />
 
       {isLive ? (
@@ -221,6 +224,7 @@ function TranscriptFeed({
   entries: ReturnType<typeof useSessionStore.getState>['transcript'];
   speakers: ReturnType<typeof useSessionStore.getState>['speakers'];
 }) {
+  const { t } = useTranslation();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -251,16 +255,16 @@ function TranscriptFeed({
             <div className="h-12 w-12 rounded-full bg-primary-50 text-primary-500 inline-flex items-center justify-center mb-3">
               <Activity className="h-5 w-5" />
             </div>
-            <p className="text-title-lg text-ink">Listening…</p>
+            <p className="text-title-lg text-ink">{t('sessions.transcript.listening')}</p>
             <p className="text-body-md text-ink-muted mt-1">
-              Waiting for the first utterance.
+              {t('sessions.transcript.waiting')}
             </p>
           </div>
         ) : (
           <ol className="flex flex-col gap-4">
             {entries.map((entry) => {
               const sp = speakers.find((s) => s.id === entry.speakerId);
-              const style = ROLE_STYLES[sp?.role ?? 'unknown'];
+              const style = ROLE_STYLES[sp?.role ?? 'speaker'];
               return (
                 <li key={entry.id} className="flex gap-3 group">
                   <div className="shrink-0 pt-1">
@@ -275,13 +279,15 @@ function TranscriptFeed({
                           style.text,
                         )}
                       >
-                        {sp?.label ?? entry.speakerId}
+                        {sp?.shortLabel ?? sp?.label ?? entry.speakerId}
                       </span>
                       <span className="text-caption font-mono text-ink-muted tabular-nums">
                         {formatAtMs(entry.atMs)}
                       </span>
                       {!entry.isFinal && (
-                        <span className="text-caption italic text-ink-muted">· listening…</span>
+                        <span className="text-caption italic text-ink-muted">
+                          · {t('sessions.transcript.partial')}
+                        </span>
                       )}
                     </div>
                     <p
@@ -311,7 +317,7 @@ function TranscriptFeed({
           }}
           className="absolute bottom-4 right-4 inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white border border-outline-soft shadow-floating text-caption font-medium text-ink hover:bg-surface-container-low"
         >
-          ↓ Latest
+          {t('sessions.transcript.latest')}
         </button>
       )}
     </div>
@@ -335,17 +341,20 @@ function SpeakerList({
 }: {
   speakers: ReturnType<typeof useSessionStore.getState>['speakers'];
 }) {
+  const { t } = useTranslation();
   return (
     <div className="bg-surface-container-lowest">
       <div className="px-5 py-3 border-b border-outline-soft flex items-center justify-between">
-        <h3 className="text-mono text-ink-muted">Speaker Identification</h3>
-        <span className="text-caption text-ink-muted">{speakers.length} detected</span>
+        <h3 className="text-mono text-ink-muted">{t('sessions.speakers.title')}</h3>
+        <span className="text-caption text-ink-muted">
+          {t('sessions.speakers.detected', { count: speakers.length })}
+        </span>
       </div>
 
       <ul className="p-3 flex flex-col gap-2">
         {speakers.length === 0 && (
           <li className="text-body-md text-ink-muted px-2 py-6 text-center">
-            Speakers will appear as they speak.
+            {t('sessions.speakers.empty')}
           </li>
         )}
         {speakers.map((sp) => {
@@ -370,7 +379,7 @@ function SpeakerList({
               <div className="min-w-0 flex-1">
                 <p className="text-body-md font-medium text-ink truncate">{sp.label}</p>
                 <p className={cn('text-caption uppercase tracking-wide', style.text)}>
-                  {ROLE_LABEL[sp.role]}
+                  {sp.shortLabel}
                 </p>
               </div>
               {sp.isSpeaking && <SpeakingIndicator accentClass={style.accent} />}
@@ -419,6 +428,7 @@ function ControlBar({
   onStop: () => void;
   onToggleMute: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-4">
       <AudioMeter level={audioLevel} muted={isMuted || !isLive} />
@@ -432,7 +442,7 @@ function ControlBar({
         onClick={onToggleMute}
         disabled={!isLive}
       >
-        {isMuted ? 'Unmute' : 'Mute'}
+        {isMuted ? t('sessions.controls.unmute') : t('sessions.controls.mute')}
       </Button>
 
       {!isLive ? (
@@ -442,7 +452,7 @@ function ControlBar({
           onClick={onStart}
           disabled={isStopping}
         >
-          {isStopping ? 'Stopping…' : 'Start Session'}
+          {isStopping ? t('sessions.controls.stopping') : t('sessions.controls.start')}
         </Button>
       ) : (
         <Button
@@ -451,7 +461,7 @@ function ControlBar({
           leftIcon={<Square className="h-4 w-4 fill-current" />}
           onClick={onStop}
         >
-          Stop Session
+          {t('sessions.controls.stop')}
         </Button>
       )}
     </div>
@@ -459,13 +469,14 @@ function ControlBar({
 }
 
 function AudioMeter({ level, muted }: { level: number; muted: boolean }) {
+  const { t } = useTranslation();
   // 24 bars, level (0-100) → count of lit bars
   const BARS = 24;
   const lit = muted ? 0 : Math.round((level / 100) * BARS);
   return (
     <div
       className="flex items-center gap-2"
-      title={muted ? 'Microphone muted' : `Input level: ${Math.round(level)}%`}
+      title={muted ? t('sessions.audio.muted') : t('sessions.audio.level', { level: Math.round(level) })}
     >
       <Volume2 className="h-4 w-4 text-ink-muted" />
       <div className="flex items-end gap-0.5 h-7">
@@ -491,23 +502,23 @@ function AudioMeter({ level, muted }: { level: number; muted: boolean }) {
 // ============================================================================
 
 function IdleView({ onStart }: { onStart: () => void }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   return (
     <Card padding="lg" className="text-center">
       <div className="mx-auto h-14 w-14 rounded-full bg-primary-50 text-primary-500 inline-flex items-center justify-center mb-4">
         <Radio className="h-7 w-7" />
       </div>
-      <h2 className="text-headline-md text-ink mb-2">No active session</h2>
+      <h2 className="text-headline-md text-ink mb-2">{t('sessions.idle.title')}</h2>
       <p className="text-body-lg text-ink-muted max-w-md mx-auto mb-6">
-        Press Start Session to begin real-time speech capture, transcription and
-        speaker identification.
+        {t('sessions.idle.description')}
       </p>
       <div className="flex items-center justify-center gap-3">
         <Button variant="ghost" leftIcon={<ArrowLeft className="h-4 w-4" />} onClick={() => navigate('/dashboard')}>
-          Back to Dashboard
+          {t('sessions.idle.back')}
         </Button>
         <Button size="lg" leftIcon={<Play className="h-5 w-5 fill-current" />} onClick={onStart}>
-          Start Session
+          {t('sessions.controls.start')}
         </Button>
       </div>
     </Card>
@@ -515,14 +526,15 @@ function IdleView({ onStart }: { onStart: () => void }) {
 }
 
 function StoppingView() {
+  const { t } = useTranslation();
   return (
     <Card padding="lg" className="text-center">
       <div className="mx-auto h-14 w-14 rounded-full bg-surface-container text-ink-muted inline-flex items-center justify-center mb-4">
         <Square className="h-6 w-6" />
       </div>
-      <h2 className="text-headline-md text-ink mb-2">Session stopped</h2>
+      <h2 className="text-headline-md text-ink mb-2">{t('sessions.stopping.title')}</h2>
       <p className="text-body-lg text-ink-muted max-w-md mx-auto">
-        Saving transcript and preparing session summary…
+        {t('sessions.stopping.description')}
       </p>
     </Card>
   );
@@ -544,8 +556,8 @@ function RecentSessionsCard({ className }: { className?: string }) {
       {past.length === 0 ? (
         <EmptyState
           icon={<Gavel className="h-5 w-5" />}
-          title="No prior sessions"
-          description="Start a session to begin recording."
+          title={t('sessions.recent.emptyTitle')}
+          description={t('sessions.recent.emptyDescription')}
         />
       ) : (
         <ul className="flex flex-col divide-y divide-outline-soft -mx-6">

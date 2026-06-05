@@ -1,11 +1,16 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { AppShell } from '@/components/layout';
+import { AppShell, AuthShell, RequireAuth } from '@/components/layout';
 import { Dashboard } from '@/pages/Dashboard';
 import { Sessions } from '@/pages/Sessions';
 import { Cases } from '@/pages/Cases';
+import { CaseDetail } from '@/pages/CaseDetail';
+import { CaseCreate } from '@/pages/CaseCreate';
+import { Login } from '@/pages/Login';
+import { Register } from '@/pages/Register';
+import { Upload } from '@/pages/Upload';
+import { Documents } from '@/pages/Documents';
 // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
 // import { ComingSoon } from '@/pages/ComingSoon';
-// import { CaseDetails } from '@/pages/CaseDetails'; // CP2
 // import { OcrProcessing } from '@/pages/OcrProcessing'; // CP2
 // import { AiSummaryCenter } from '@/pages/AiSummaryCenter'; // CP2
 // import { GeneratedDocuments } from '@/pages/GeneratedDocuments'; // CP2
@@ -17,9 +22,18 @@ import { Cases } from '@/pages/Cases';
 import { ENABLED_FEATURES } from '@/lib/featureFlags';
 
 export const router = createBrowserRouter([
+  // ---- Public auth routes (no AppShell, no RequireAuth) ----
+  { path: '/login', element: <AuthShell><Login /></AuthShell> },
+  { path: '/register', element: <AuthShell><Register /></AuthShell> },
+
+  // ---- Authed app shell ----
   {
     path: '/',
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
 
@@ -28,8 +42,21 @@ export const router = createBrowserRouter([
       ...(ENABLED_FEATURES.sessions ? [{ path: 'sessions', element: <Sessions /> }] : []),
       ...(ENABLED_FEATURES.cases ? [{ path: 'cases', element: <Cases /> }] : []),
 
+      // Case Management & Document Review (case-management.md)
+      ...(ENABLED_FEATURES.caseDetails
+        ? [
+            { path: 'cases/new', element: <CaseCreate /> },
+            { path: 'cases/:id', element: <CaseDetail /> },
+          ]
+        : []),
+
+      // Phase B — standalone upload + library pages
+      ...(ENABLED_FEATURES.upload ? [{ path: 'upload', element: <Upload /> }] : []),
+      ...(ENABLED_FEATURES.documentsLibrary
+        ? [{ path: 'documents', element: <Documents /> }]
+        : []),
+
       // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
-      // { path: 'cases/:id', element: <CaseDetails /> },
       // { path: 'documents', element: <OcrProcessing /> },
       // { path: 'documents/generated', element: <GeneratedDocuments /> },
       // { path: 'ai', element: <AiSummaryCenter /> },

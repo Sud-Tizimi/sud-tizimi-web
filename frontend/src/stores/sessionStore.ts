@@ -14,6 +14,7 @@ export interface TranscriptEntry {
 export interface ActiveSpeaker {
   id: string;
   label: string;
+  shortLabel: string;
   role: SpeakerRole;
   isSpeaking: boolean;
   lastSpokeAtMs: number;
@@ -47,7 +48,7 @@ interface SessionState {
 
   upsertPartial: (speakerId: string, text: string, atMs: number) => void;
   commitFinalFor: (speakerId: string) => void;
-  registerSpeaker: (id: string, label: string, role: SpeakerRole) => void;
+  registerSpeaker: (id: string, label?: string, role?: SpeakerRole, shortLabel?: string) => void;
   setSpeakerSpeaking: (id: string, speaking: boolean) => void;
   setAudioLevel: (level: number) => void;
   setMuted: (muted: boolean) => void;
@@ -144,21 +145,36 @@ export const useSessionStore = create<SessionState>((set) => ({
       };
     }),
 
-  registerSpeaker: (id, label, role) =>
+  registerSpeaker: (id, label, role = 'speaker', shortLabel) =>
     set((s) => {
+      const fallback = makeSpeakerLabels(id, s.speakers.length);
       const existing = s.speakers.find((sp) => sp.id === id);
       if (existing) {
         if (existing.role !== 'unknown') return s;
         return {
           speakers: s.speakers.map((sp) =>
-            sp.id === id ? { ...sp, label, role } : sp,
+            sp.id === id
+              ? {
+                  ...sp,
+                  label: label ?? fallback.label,
+                  shortLabel: shortLabel ?? fallback.shortLabel,
+                  role,
+                }
+              : sp,
           ),
         };
       }
       return {
         speakers: [
           ...s.speakers,
-          { id, label, role, isSpeaking: false, lastSpokeAtMs: 0 },
+          {
+            id,
+            label: label ?? fallback.label,
+            shortLabel: shortLabel ?? fallback.shortLabel,
+            role,
+            isSpeaking: false,
+            lastSpokeAtMs: 0,
+          },
         ],
       };
     }),
@@ -174,8 +190,30 @@ export const useSessionStore = create<SessionState>((set) => ({
 
 function ensureSpeaker(speakers: ActiveSpeaker[], id: string): ActiveSpeaker[] {
   if (speakers.some((s) => s.id === id)) return speakers;
+  const fallback = makeSpeakerLabels(id, speakers.length);
   return [
     ...speakers,
-    { id, label: id, role: 'unknown', isSpeaking: false, lastSpokeAtMs: 0 },
+    {
+      id,
+      label: fallback.label,
+      shortLabel: fallback.shortLabel,
+      role: 'speaker',
+      isSpeaking: false,
+      lastSpokeAtMs: 0,
+    },
   ];
+}
+
+function makeSpeakerLabels(id: string, currentCount: number): { label: string; shortLabel: string } {
+  const parsed = parseSpeakerNumber(id);
+  const n = parsed ?? currentCount + 1;
+  return { label: `Speaker ${n}`, shortLabel: `SP${n}` };
+}
+
+function parseSpeakerNumber(id: string): number | null {
+  const match = id.match(/(?:speaker|spk|sp)[-_ ]?0*(\d+)$/i);
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isFinite(n)) return null;
+  return n === 0 ? 1 : n;
 }
