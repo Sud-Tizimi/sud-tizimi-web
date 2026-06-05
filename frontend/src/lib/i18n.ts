@@ -23,6 +23,7 @@ const DOCUMENT_TYPES = {
 
 const ACTIVITY_TRANSLATIONS: Record<string, string> = {
   case_created: 'Case created',
+  case_edited: 'Case edited',
   documents_uploaded: 'Documents uploaded',
   documents_classified: 'AI classified documents',
   case_submitted: 'Case submitted for review',
@@ -224,6 +225,9 @@ const en = {
         title: 'Cases',
         subtitle: 'All cases in the workflow',
         newCase: 'New Case',
+        rowEdit: 'Edit',
+        rowDelete: 'Delete',
+        deleteConfirm: 'Delete this case? This cannot be undone. Attached documents become orphans and remain available in /documents.',
         filterAll: 'All',
         filterMine: 'Assigned to me',
         filterStatus: 'Status',
@@ -264,6 +268,14 @@ const en = {
           create: 'Create case',
           creating: 'Creating…',
         },
+      },
+      edit: {
+        title: 'Edit case',
+        subtitle: 'You can change the case fields while it is still in draft or returned.',
+        save: 'Save changes',
+        saving: 'Saving…',
+        lockedTitle: 'Cannot edit this case',
+        lockedBody: 'Only the owning assistant can edit a case, and only while it is in draft or returned.',
       },
       detail: {
         tabs: {
@@ -326,6 +338,8 @@ const en = {
           reopen: 'Re-open for editing',
           viewSession: 'Open live session',
           backToList: 'Back to cases',
+          edit: 'Edit case',
+          delete: 'Delete case',
         },
         submitGuard: {
           title: 'Cannot submit yet',
@@ -592,6 +606,9 @@ const uz = {
         title: 'Ishlar',
         subtitle: 'Barcha ishlarni boshqarish',
         newCase: 'Yangi ish',
+        rowEdit: 'Tahrirlash',
+        rowDelete: 'Oʻchirish',
+        deleteConfirm: 'Ishni oʻchirilsinmi? Bu qaytarib boʻlmaydi. Biriktirilgan hujjatlar ajratiladi va /documents sahifasida qoladi.',
         filterAll: 'Hammasi',
         filterMine: 'Menga biriktirilgan',
         filterStatus: 'Holat',
@@ -632,6 +649,14 @@ const uz = {
           create: 'Yaratish',
           creating: 'Yaratilmoqda…',
         },
+      },
+      edit: {
+        title: 'Ishni tahrirlash',
+        subtitle: 'Ish holati «qoralama» yoki «qaytarilgan» boʻlsa maydonlarni oʻzgartirishingiz mumkin.',
+        save: 'Oʻzgarishlarni saqlash',
+        saving: 'Saqlanmoqda…',
+        lockedTitle: 'Bu ishni tahrirlab boʻlmaydi',
+        lockedBody: 'Faqat egasi kotib ishi tahrirlashi mumkin, va faqat qoralama yoki qaytarilgan holatda.',
       },
       detail: {
         tabs: {
@@ -692,6 +717,8 @@ const uz = {
           reopen: 'Tahrirlash uchun qayta ochish',
           viewSession: 'Jonli sessiyaga oʻtish',
           backToList: 'Ishlar roʻyxatiga',
+          edit: 'Ishni tahrirlash',
+          delete: 'Ishni oʻchirish',
         },
         submitGuard: {
           title: 'Hali yuborib boʻlmaydi',
@@ -973,6 +1000,9 @@ const ru = {
         title: 'Дела',
         subtitle: 'Все дела в работе',
         newCase: 'Новое дело',
+        rowEdit: 'Редактировать',
+        rowDelete: 'Удалить',
+        deleteConfirm: 'Удалить это дело? Действие необратимо. Прикреплённые документы станут доступны в /documents как сироты.',
         filterAll: 'Все',
         filterMine: 'Назначенные мне',
         filterStatus: 'Статус',
@@ -1013,6 +1043,14 @@ const ru = {
           create: 'Создать дело',
           creating: 'Создание…',
         },
+      },
+      edit: {
+        title: 'Редактировать дело',
+        subtitle: 'Менять поля дела можно, пока оно в статусе «черновик» или «возвращено».',
+        save: 'Сохранить изменения',
+        saving: 'Сохранение…',
+        lockedTitle: 'Это дело нельзя редактировать',
+        lockedBody: 'Только владелец-помощник может редактировать дело, и только в статусе «черновик» или «возвращено».',
       },
       detail: {
         tabs: {
@@ -1073,6 +1111,8 @@ const ru = {
           reopen: 'Открыть для редактирования',
           viewSession: 'Открыть заседание',
           backToList: 'К списку дел',
+          edit: 'Редактировать дело',
+          delete: 'Удалить дело',
         },
         submitGuard: {
           title: 'Пока нельзя отправить',

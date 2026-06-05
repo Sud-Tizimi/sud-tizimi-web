@@ -111,6 +111,11 @@ async def create_case(
     )
     session.add(case)
     await session.flush()
+    # Pull DB-generated server defaults (created_at/updated_at) into the
+    # Python object NOW, while the session is still active. Otherwise
+    # Pydantic's from_attributes=True triggers a lazy refresh AFTER the
+    # session closes → MissingGreenlet on async.
+    await session.refresh(case, ["created_at", "updated_at"])
 
     await activity_service.record_event(
         session,
@@ -120,6 +125,110 @@ async def create_case(
         message_key="activity.case_created",
     )
     return case
+
+
+# ---------------------------------------------------------------------------
+# Edit
+# ---------------------------------------------------------------------------
+
+async def update_case(
+    session: AsyncSession,
+    *,
+    actor: User,
+    case_id: str,
+    case_number: Optional[str] = None,
+    citizen_name: Optional[str] = None,
+    description: Optional[str] = None,
+    assigned_judge_id: Optional[str] = None,
+) -> Case:
+    """Edit a case. Only the owning assistant can do it, and only while the
+    case is in ``draft`` or ``returned`` (i.e. not under review / approved).
+    A no-op request (no field provided) is rejected with 400.
+
+    The ``case_number`` and ``assigned_judge_id`` re-validations mirror the
+    create flow (uniqueness + role). Partial updates leave unspecified
+    fields unchanged.
+    """
+    case = await get_case_in_scope(session, case_id, actor)
+    if actor.role != UserRole.ASSISTANT or case.assistant_id != actor.id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if case.status not in (CaseStatus.DRAFT, CaseStatus.RETURNED):
+        raise HTTPException(
+            status_code=409,
+            detail="case_locked:only_draft_or_returned_can_be_edited",
+        )
+
+    if (
+        case_number is None
+        and citizen_name is None
+        and description is None
+        and assigned_judge_id is None
+    ):
+        raise HTTPException(status_code=400, detail="no_fields_to_update")
+
+    if case_number is not None and case_number != case.case_number:
+        existing = await session.execute(
+            select(Case).where(Case.case_number == case_number)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="case_number_taken")
+        case.case_number = case_number
+
+    if assigned_judge_id is not None and assigned_judge_id != case.assigned_judge_id:
+        judge = await session.get(User, assigned_judge_id)
+        if judge is None or judge.role != UserRole.JUDGE:
+            raise HTTPException(status_code=400, detail="invalid_judge")
+        case.assigned_judge_id = judge.id
+
+    if citizen_name is not None:
+        case.citizen_name = citizen_name
+    if description is not None:
+        case.description = description
+
+    case.updated_at = datetime.utcnow()
+    await session.flush()
+
+    await activity_service.record_event(
+        session,
+        case_id=case.id,
+        type=ActivityType.CASE_EDITED,
+        actor_id=actor.id,
+        message_key="activity.case_edited",
+    )
+    return case
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+async def delete_case(
+    session: AsyncSession, *, actor: User, case_id: str
+) -> None:
+    """Delete a case. Only the owning assistant can do it, and only while
+    the case is still in ``draft`` (a case that's already been submitted,
+    approved, or returned lives on the audit trail).
+
+    Attached documents are NOT deleted — the ``documents.case_id`` FK is
+    declared ``ON DELETE SET NULL``, so they simply become orphans visible
+    in ``/documents?scope=mine`` for re-attachment or final cleanup.
+
+    We intentionally do NOT write a ``case_deleted`` activity row: the
+    ``activity_events.case_id`` FK is ``ON DELETE CASCADE``, so such a row
+    would be erased in the same transaction and the audit breadcrumb would
+    never land anywhere.
+    """
+    case = await get_case_in_scope(session, case_id, actor)
+    if actor.role != UserRole.ASSISTANT or case.assistant_id != actor.id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if case.status != CaseStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail="case_locked:only_draft_can_be_deleted",
+        )
+
+    await session.delete(case)
+    await session.flush()
 
 
 # ---------------------------------------------------------------------------

@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
-import { Scale, FileSignature, Gavel, Plus, Inbox } from 'lucide-react';
+import { Scale, FileSignature, Gavel, Plus, Inbox, Pencil, Trash } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Card, CardHeader, CardTitle, CardDescription, Button, Badge, EmptyState } from '@/components/ui';
-import { useCases, useJudges, useAssistants } from '@/hooks/queries';
+import { Card, CardHeader, CardTitle, CardDescription, Button, Badge, EmptyState, IconButton } from '@/components/ui';
+import { useCases, useDeleteCase, useJudges, useAssistants } from '@/hooks/queries';
 import { useAuth } from '@/hooks/useAuth';
 import { CASE_STATUS_BADGE } from '@/lib/caseStyles';
 import { cn } from '@/lib/cn';
@@ -25,10 +25,12 @@ const STATUS_FILTER_KEYS: Record<StatusFilter, string> = {
 export function Cases() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
+  const userId = user?.id ?? '';
   const { data: cases = [], isLoading } = useCases();
   const { data: judges = [] } = useJudges();
   const { data: assistants = [] } = useAssistants();
+  const deleteMut = useDeleteCase();
   const [filter, setFilter] = useState<StatusFilter>('all');
 
   // Server already scopes (judges see their assigned, assistants see their own),
@@ -161,6 +163,11 @@ export function Cases() {
                   <th className="text-right text-mono text-ink-muted h-10 px-6 font-medium hidden sm:table-cell">
                     {t('caseMgmt.list.columns.updated')}
                   </th>
+                  {role === 'assistant' && (
+                    <th className="text-right text-mono text-ink-muted h-10 px-3 font-medium">
+                      {/* actions — no header label */}
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -177,6 +184,23 @@ export function Cases() {
                       role === 'judge' ? assistantName(c.assistantId) : undefined
                     }
                     onOpen={() => navigate(`/cases/${c.id}`)}
+                    onEdit={
+                      role === 'assistant' &&
+                      (c.status === 'draft' || c.status === 'returned') &&
+                      c.assistantId === userId
+                        ? () => navigate(`/cases/${c.id}/edit`)
+                        : undefined
+                    }
+                    onDelete={
+                      role === 'assistant' && c.status === 'draft' && c.assistantId === userId
+                        ? () => {
+                            if (window.confirm(t('caseMgmt.list.deleteConfirm'))) {
+                              deleteMut.mutate(c.id);
+                            }
+                          }
+                        : undefined
+                    }
+                    deleting={deleteMut.isPending && deleteMut.variables === c.id}
                   />
                 ))}
               </tbody>
@@ -195,6 +219,9 @@ function CaseRow({
   judgeLabel,
   assistantLabel,
   onOpen,
+  onEdit,
+  onDelete,
+  deleting,
 }: {
   caseItem: Case;
   documentsCount: number;
@@ -202,6 +229,9 @@ function CaseRow({
   judgeLabel?: string;
   assistantLabel?: string;
   onOpen: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
 }) {
   const { t } = useTranslation();
   const status = caseItem.status;
@@ -264,6 +294,34 @@ function CaseRow({
           {format(new Date(caseItem.updatedAt), 'yyyy-MM-dd HH:mm', { locale: undefined })}
         </p>
       </td>
+      {role === 'assistant' && (onEdit || onDelete) && (
+        <td className="px-3 py-4">
+          {/* ``e.stopPropagation`` is required because the row itself is
+              clickable and would otherwise navigate to the detail page
+              when the user just wanted to hit an action button. */}
+          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {onEdit && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                label={t('caseMgmt.list.rowEdit')}
+                onClick={onEdit}
+                icon={<Pencil className="h-4 w-4" />}
+              />
+            )}
+            {onDelete && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                label={t('caseMgmt.list.rowDelete')}
+                onClick={onDelete}
+                disabled={deleting}
+                icon={<Trash className="h-4 w-4 text-error" />}
+              />
+            )}
+          </div>
+        </td>
+      )}
     </tr>
   );
 }

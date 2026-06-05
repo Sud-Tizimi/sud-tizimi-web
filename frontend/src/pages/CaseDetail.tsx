@@ -17,6 +17,8 @@ import {
   Upload as UploadIcon,
   Plus,
   X,
+  Pencil,
+  Trash,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardHeader, CardTitle, Button, EmptyState, Badge } from '@/components/ui';
@@ -29,6 +31,7 @@ import {
   useApproveCase,
   useCase,
   useCaseDocuments,
+  useDeleteCase,
   useDeleteDocument,
   useJudges,
   useReopenCase,
@@ -64,6 +67,7 @@ export function CaseDetail() {
   const approveMut = useApproveCase(id ?? '');
   const returnMut = useReturnCase(id ?? '');
   const reopenMut = useReopenCase(id ?? '');
+  const deleteMut = useDeleteCase();
 
   const [tab, setTab] = useState<Tab>('documents');
   const [modal, setModal] = useState<null | 'approve' | 'return'>(null);
@@ -123,6 +127,11 @@ export function CaseDetail() {
   const canApprove = isJudgeOwner && caseItem.status === 'under_review';
   const canReturn = isJudgeOwner && (caseItem.status === 'under_review' || caseItem.status === 'approved');
   const canReopen = isJudgeOwner && (caseItem.status === 'returned' || caseItem.status === 'approved');
+  // Edit / delete rules mirror the server's. The page hides the controls
+  // when the case is locked; the server still rejects the action with
+  // 409 ``case_locked`` if the UI is bypassed.
+  const canEdit = isAssistantOwner && (caseItem.status === 'draft' || caseItem.status === 'returned');
+  const canDeleteCase = isAssistantOwner && caseItem.status === 'draft';
 
   const statusBadge = CASE_STATUS_BADGE[caseItem.status];
 
@@ -141,6 +150,33 @@ export function CaseDetail() {
             >
               {t('caseMgmt.detail.actions.backToList')}
             </Button>
+            {canEdit && (
+              <Button
+                variant="secondary"
+                size="md"
+                leftIcon={<Pencil className="h-4 w-4" />}
+                onClick={() => navigate(`/cases/${caseItem.id}/edit`)}
+              >
+                {t('caseMgmt.detail.actions.edit')}
+              </Button>
+            )}
+            {canDeleteCase && (
+              <Button
+                variant="ghost"
+                size="md"
+                leftIcon={<Trash className="h-4 w-4 text-error" />}
+                onClick={() => {
+                  if (window.confirm(t('caseMgmt.list.deleteConfirm'))) {
+                    deleteMut.mutate(caseItem.id, {
+                      onSuccess: () => navigate('/cases'),
+                    });
+                  }
+                }}
+                disabled={deleteMut.isPending}
+              >
+                {t('caseMgmt.detail.actions.delete')}
+              </Button>
+            )}
             {canSubmit && (
               <Button
                 size="md"

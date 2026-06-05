@@ -35,6 +35,17 @@ class CaseCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class CaseUpdateRequest(BaseModel):
+    """PATCH body for editing a case. All fields are optional, but at least
+    one must be present (enforced in the service layer)."""
+    case_number: str | None = Field(default=None, alias="caseNumber", min_length=1, max_length=64)
+    citizen_name: str | None = Field(default=None, alias="citizenName", min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=10_000)
+    assigned_judge_id: str | None = Field(default=None, alias="assignedJudgeId")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class CaseReturnRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=2_000)
 

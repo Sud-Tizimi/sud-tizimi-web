@@ -71,6 +71,7 @@ class ActivityType(str, Enum):
     """Timeline event kinds — one per workflow transition or document change."""
 
     CASE_CREATED = "case_created"
+    CASE_EDITED = "case_edited"
     DOCUMENTS_UPLOADED = "documents_uploaded"
     DOCUMENTS_CLASSIFIED = "documents_classified"
     CASE_SUBMITTED = "case_submitted"

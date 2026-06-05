@@ -5,6 +5,7 @@ import { Sessions } from '@/pages/Sessions';
 import { Cases } from '@/pages/Cases';
 import { CaseDetail } from '@/pages/CaseDetail';
 import { CaseCreate } from '@/pages/CaseCreate';
+import { CaseEdit } from '@/pages/CaseEdit';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
 import { Upload } from '@/pages/Upload';
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
         ? [
             { path: 'cases/new', element: <CaseCreate /> },
             { path: 'cases/:id', element: <CaseDetail /> },
+            { path: 'cases/:id/edit', element: <CaseEdit /> },
           ]
         : []),
 

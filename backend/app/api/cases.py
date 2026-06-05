@@ -1,7 +1,7 @@
 """Case CRUD + workflow router."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -13,6 +13,7 @@ from .schemas.case import (
     CaseListResponse,
     CaseResponse,
     CaseReturnRequest,
+    CaseUpdateRequest,
     StatusTransitionResponse,
 )
 from .schemas.document import DocumentListResponse, DocumentResponse
@@ -55,6 +56,37 @@ async def create_one(
     )
     await session.commit()
     return CaseResponse.model_validate(case)
+
+
+@router.patch("/{case_id}", response_model=CaseResponse)
+async def update_one(
+    case_id: str,
+    payload: CaseUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CaseResponse:
+    case = await case_service.update_case(
+        session,
+        actor=user,
+        case_id=case_id,
+        case_number=payload.case_number,
+        citizen_name=payload.citizen_name,
+        description=payload.description,
+        assigned_judge_id=payload.assigned_judge_id,
+    )
+    await session.commit()
+    return CaseResponse.model_validate(case)
+
+
+@router.delete("/{case_id}", status_code=204, response_class=Response)
+async def delete_one(
+    case_id: str,
+    session: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    await case_service.delete_case(session, actor=user, case_id=case_id)
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{case_id}/submit", response_model=StatusTransitionResponse)
