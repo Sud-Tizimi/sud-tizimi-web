@@ -2,6 +2,8 @@ import { useTranslation } from 'react-i18next';
 import { FileText } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/cn';
+import { isEnabled } from '@/lib/featureFlags';
+import { useDocumentAnalysis } from '@/hooks/queries';
 import type { CaseDocument } from '@/types/domain';
 
 function formatBytes(bytes: number): string {
@@ -65,6 +67,12 @@ function DocumentItem({
 }) {
   const { t } = useTranslation();
   const classifying = doc.aiConfidence === -1;
+  // Per-document AI status badge. Disabled (returns null) when the feature
+  // flag is off so we don't fire unnecessary network requests.
+  const { data: aiRecords } = useDocumentAnalysis(
+    isEnabled('aiAnalysis') ? doc.id : null,
+  );
+  const latestAi = aiRecords?.[0];
 
   return (
     <li>
@@ -96,6 +104,12 @@ function DocumentItem({
                 type: t(`documentType.${doc.detectedType}`),
                 confidence: doc.aiConfidence,
               })}
+            </p>
+          )}
+          {isEnabled('aiAnalysis') && latestAi?.status === 'done' && (
+            <p className="text-caption text-primary-600 inline-flex items-center gap-1 mt-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary-500" />
+              {t('aiAnalysis.docBadgeAnalyzed')}
             </p>
           )}
         </div>

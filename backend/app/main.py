@@ -6,11 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import (
     activity,
+    ai_analyze,
+    asr,
     auth,
     cases,
     documents,
     health,
     notifications,
+    ocr,
     sessions,
     users,
     websocket,
@@ -76,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(websocket.router)
+    # Voice ASR cloud/local integration.
+    app.include_router(asr.router, prefix="/api")
     # Phase A.
     app.include_router(auth.router, prefix="/api")
     app.include_router(users.router, prefix="/api")
@@ -84,6 +89,11 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/api")
     # Phase B.
     app.include_router(documents.router, prefix="/api")
+    # Phase 27 — SudAI-Law-UZ legal document analysis.
+    app.include_router(ai_analyze.case_router, prefix="/api")
+    app.include_router(ai_analyze.doc_router, prefix="/api")
+    # Phase D — OCR (UDIP engine ported: PaddleOCR / Tesseract / Gemini / Stub).
+    app.include_router(ocr.router, prefix="/api")
     return app
 
 

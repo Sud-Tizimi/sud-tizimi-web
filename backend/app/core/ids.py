@@ -20,3 +20,8 @@ def gen_document_id() -> str:
     happen in the same millisecond.
     """
     return f"doc-{uuid.uuid4().hex}"
+
+
+def gen_ai_analysis_id() -> str:
+    """Format: ai-{uuid4-hex}. AI analysis runs (per-document and per-case)."""
+    return f"ai-{uuid.uuid4().hex}"

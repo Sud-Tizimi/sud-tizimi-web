@@ -10,6 +10,7 @@ import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
 import { Upload } from '@/pages/Upload';
 import { Documents } from '@/pages/Documents';
+import { OcrProcessing } from '@/pages/OcrProcessing';
 // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
 // import { ComingSoon } from '@/pages/ComingSoon';
 // import { OcrProcessing } from '@/pages/OcrProcessing'; // CP2
@@ -57,9 +58,9 @@ export const router = createBrowserRouter([
       ...(ENABLED_FEATURES.documentsLibrary
         ? [{ path: 'documents', element: <Documents /> }]
         : []),
+      ...(ENABLED_FEATURES.ocrProcessing ? [{ path: 'ocr', element: <OcrProcessing /> }] : []),
 
       // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1
-      // { path: 'documents', element: <OcrProcessing /> },
       // { path: 'documents/generated', element: <GeneratedDocuments /> },
       // { path: 'ai', element: <AiSummaryCenter /> },
       // { path: 'notifications', element: <NotificationsCenter /> },

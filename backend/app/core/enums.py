@@ -79,6 +79,64 @@ class ActivityType(str, Enum):
     CASE_RETURNED = "case_returned"
     DOCUMENT_ADDED = "document_added"
     DOCUMENT_REMOVED = "document_removed"
+    # Phase 27 — SudAI-Law-UZ
+    AI_DOCUMENT_ANALYSIS_REQUESTED = "ai_document_analysis_requested"
+    AI_DOCUMENT_ANALYSIS_COMPLETED = "ai_document_analysis_completed"
+    AI_DOCUMENT_ANALYSIS_FAILED = "ai_document_analysis_failed"
+    AI_CASE_ANALYSIS_REQUESTED = "ai_case_analysis_requested"
+    AI_CASE_ANALYSIS_COMPLETED = "ai_case_analysis_completed"
+    AI_CASE_ANALYSIS_FAILED = "ai_case_analysis_failed"
+
+
+class AIAnalysisStatus(str, Enum):
+    """Lifecycle of a SudAI analysis run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class CaseLegalCategory(str, Enum):
+    """Top-level legal category assigned by SudAI classifier.
+
+    Values are stored snake_case in the database and surfaced to the UI
+    via i18n keys (``aiAnalysis.category.*``). They are intentionally
+    distinct from ``DocumentType`` — the classifier outputs a procedural
+    category (the kind of dispute), not a document type.
+    """
+
+    OILAVIY_NIZO = "oilaviy_nizo"
+    MEHNAT_NIZOSI = "mehnat_nizosi"
+    MAMURIY_YOKI_IQTISODIY_NIZO = "mamuriy_yoki_iqtisodiy_nizo"
+    FUQAROLIK_ISHI = "fuqarolik_ishi"
+    UMUMIY_HUQUQIY_MUROJAAT = "umumiy_huquqiy_murojaat"
+
+
+class ProcedureType(str, Enum):
+    """Which court procedure the case is likely to follow."""
+
+    FUQAROLIK_SUD = "fuqarolik_sud"
+    MAMURIY_YOKI_IQTISODIY_SUD = "mamuriy_yoki_iqtisodiy_sud"
+    SUD_XODIMI_ANIQLAYDI = "sud_xodimi_aniqlaydi"
+
+
+class DocumentLanguage(str, Enum):
+    """Detected language of an analysed document."""
+
+    UZBEK_LATIN = "uzbek_latin"
+    UZBEK_CYRILLIC_OR_RUSSIAN = "uzbek_cyrillic_or_russian"
+
+
+class AnonymizationLabel(str, Enum):
+    """PII/PHI categories detected by the anonymizer."""
+
+    PHONE = "phone"
+    PASSPORT = "passport"
+    JSHSHIR = "jshshir"
+    STIR = "stir"
+    ADDRESS = "address"
+    FISH = "fish"
 
 
 class NotificationKind(str, Enum):

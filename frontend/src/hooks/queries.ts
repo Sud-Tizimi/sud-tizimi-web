@@ -16,6 +16,7 @@ import {
 import { api, apiForm } from '@/lib/api';
 import type {
   ActivityEvent,
+  AIAnalysisRecord,
   AppNotification,
   Case,
   CaseDocument,
@@ -37,6 +38,10 @@ export const qk = {
   notifications: () => ['notifications'] as const,
   judges: () => ['users', 'judges'] as const,
   assistants: () => ['users', 'assistants'] as const,
+  // Phase 27 — SudAI analysis history
+  caseAnalysis: (caseId: string) => ['case', caseId, 'ai-analysis'] as const,
+  documentAnalysis: (docId: string) => ['document', docId, 'ai-analysis'] as const,
+  ocrEngine: () => ['ocr', 'engine'] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,6 +74,31 @@ interface DocumentListResponse {
 }
 interface DocumentOneResponse {
   document: CaseDocument;
+}
+interface AIAnalysisListResponse {
+  records: AIAnalysisRecord[];
+}
+export interface OcrBox {
+  text: string;
+  bbox: number[];
+  confidence: number;
+}
+export interface OcrResult {
+  text: string;
+  boxes: OcrBox[];
+  confidence: number;
+  engine: string;
+  lang: string | null;
+  page_number: number;
+}
+export interface OcrProcessResponse {
+  pages: OcrResult[];
+  parser: string;
+  metadata: Record<string, unknown>;
+}
+export interface OcrEngineStatus {
+  real_engine: boolean;
+  active_engine: string;
 }
 
 type CaseApiResponse = Case | CaseOneResponse | StatusTransitionApiResponse;
@@ -440,4 +470,124 @@ export function useDetachDocument() {
  * bearer token. We do this client-side so a normal link-click works. */
 export function downloadDocumentHref(id: string): string {
   return `/api/documents/${id}/download`;
+}
+
+// ---------------------------------------------------------------------------
+// OCR — engine status + ad-hoc processing
+// ---------------------------------------------------------------------------
+
+export function useOcrEngine() {
+  return useQuery({
+    queryKey: qk.ocrEngine(),
+    queryFn: async () => api<OcrEngineStatus>('/api/ocr/engine'),
+  });
+}
+
+interface OcrUploadInput {
+  file: File;
+  lang?: string;
+}
+
+function appendOcrForm(input: OcrUploadInput): FormData {
+  const form = new FormData();
+  form.append('file', input.file, input.file.name);
+  if (input.lang) form.append('lang', input.lang);
+  return form;
+}
+
+export function useOcrProcessImage() {
+  return useMutation({
+    mutationFn: async (input: OcrUploadInput) =>
+      apiForm<OcrResult>('/api/ocr/image', appendOcrForm(input)),
+  });
+}
+
+export function useOcrProcessDocument() {
+  return useMutation({
+    mutationFn: async (input: OcrUploadInput) =>
+      apiForm<OcrProcessResponse>('/api/ocr/process', appendOcrForm(input)),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 27 — SudAI-Law-UZ analysis (per-case + per-document)
+// ---------------------------------------------------------------------------
+
+/** Case-level analysis history. The AI panel reads the *latest* record. */
+export function useCaseAnalysis(caseId: string | null) {
+  return useQuery({
+    queryKey: caseId ? qk.caseAnalysis(caseId) : ['case-ai-analysis', 'none'],
+    queryFn: async () => {
+      const res = await api<AIAnalysisListResponse>(`/api/cases/${caseId}/analysis`);
+      return res.records;
+    },
+    enabled: !!caseId,
+    refetchInterval: (query) => {
+      // While a run is pending or running, poll every 2s so the AI panel
+      // transitions to the result without a manual refresh. Once we see
+      // a terminal status, stop polling.
+      const data = query.state.data as AIAnalysisRecord[] | undefined;
+      const latest = data?.[0];
+      if (!latest) return false;
+      return latest.status === 'pending' || latest.status === 'running' ? 2000 : false;
+    },
+  });
+}
+
+/** Document-level analysis history. */
+export function useDocumentAnalysis(documentId: string | null) {
+  return useQuery({
+    queryKey: documentId ? qk.documentAnalysis(documentId) : ['document-ai-analysis', 'none'],
+    queryFn: async () => {
+      const res = await api<AIAnalysisListResponse>(`/api/documents/${documentId}/analysis`);
+      return res.records;
+    },
+    enabled: !!documentId,
+    refetchInterval: (query) => {
+      const data = query.state.data as AIAnalysisRecord[] | undefined;
+      const latest = data?.[0];
+      if (!latest) return false;
+      return latest.status === 'pending' || latest.status === 'running' ? 2000 : false;
+    },
+  });
+}
+
+/** Trigger a case-level aggregated analysis. Permission: case-scope. */
+export function useAnalyzeCase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (caseId: string) => {
+      const res = await api<AIAnalysisRecord>(`/api/cases/${caseId}/analysis`, { method: 'POST' });
+      return res;
+    },
+    onSuccess: (record) => {
+      qc.invalidateQueries({ queryKey: qk.caseAnalysis(record.caseId) });
+      qc.invalidateQueries({ queryKey: qk.case(record.caseId) });
+      qc.invalidateQueries({ queryKey: qk.activity(record.caseId) });
+    },
+  });
+}
+
+interface AnalyzeDocumentInput {
+  documentId: string;
+  caseId: string | null;
+}
+
+/** Trigger a single-document analysis. Permission: doc-scope. */
+export function useAnalyzeDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AnalyzeDocumentInput) => {
+      const res = await api<AIAnalysisRecord>(`/api/documents/${input.documentId}/analysis`, {
+        method: 'POST',
+      });
+      return res;
+    },
+    onSuccess: (record) => {
+      qc.invalidateQueries({ queryKey: qk.documentAnalysis(record.documentId ?? '') });
+      qc.invalidateQueries({ queryKey: qk.caseAnalysis(record.caseId) });
+      qc.invalidateQueries({ queryKey: qk.case(record.caseId) });
+      qc.invalidateQueries({ queryKey: qk.activity(record.caseId) });
+    },
+  });
 }

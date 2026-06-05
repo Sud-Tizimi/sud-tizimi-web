@@ -5,6 +5,7 @@ import {
   Scale,
   Radio,
   FileText,
+  ScanLine,
   // CP2 FEATURE — ENABLE AFTER CHECKPOINT 1
   Sparkles,
   Bell,
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard, flag: 'dashboard' },
   { to: '/cases', labelKey: 'nav.cases', icon: Scale, flag: 'cases' },
   { to: '/documents', labelKey: 'nav.documents', icon: FileText, flag: 'documentsLibrary' },
+  { to: '/ocr', labelKey: 'nav.ocr', icon: ScanLine, flag: 'ocrProcessing' },
   { to: '/sessions', labelKey: 'nav.sessions', icon: Radio, flag: 'sessions' },
 
   // CP2 FEATURE — HIDDEN FOR MVP — ENABLE AFTER CHECKPOINT 1

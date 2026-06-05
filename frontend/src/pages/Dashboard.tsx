@@ -94,29 +94,29 @@ export function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <SubsystemCard
             icon={<Cpu className="h-5 w-5" />}
-            label="STT"
+            label={t('dashboard.subsystem.sttLabel')}
             value={t('system.online')}
             detail={SYSTEM_STATUS.sttEngine}
             metric={`${SYSTEM_STATUS.sttLatencyMs} ms`}
-            metricLabel="latency"
+            metricLabel={t('dashboard.subsystem.latency')}
             state={SYSTEM_STATUS.state}
           />
           <SubsystemCard
             icon={<Headphones className="h-5 w-5" />}
-            label="Speaker Identification"
+            label={t('dashboard.subsystem.speakerIdLabel')}
             value={t(`system.${SYSTEM_STATUS.speakerIdState}`)}
             detail={SYSTEM_STATUS.diarizationEngine}
-            metric={isLive ? `${speakerCount} active` : '—'}
-            metricLabel={isLive ? 'speakers' : 'awaiting session'}
+            metric={isLive ? t('dashboard.subsystem.speakersActive', { count: speakerCount }) : '—'}
+            metricLabel={isLive ? t('dashboard.subsystem.speakers') : t('dashboard.subsystem.speakersAwaiting')}
             state={SYSTEM_STATUS.speakerIdState}
           />
           <SubsystemCard
             icon={<Users className="h-5 w-5" />}
             label={t('dashboard.activeSessions')}
             value={`${SYSTEM_STATUS.activeSessions}`}
-            detail={isLive ? 'Including your live session' : 'No sessions running'}
-            metric={isLive ? '1 live now' : 'Idle'}
-            metricLabel="right now"
+            detail={isLive ? t('dashboard.subsystem.includingLive') : t('dashboard.subsystem.noSessionsRunning')}
+            metric={isLive ? t('dashboard.subsystem.liveNow') : t('dashboard.subsystem.idle')}
+            metricLabel={t('dashboard.subsystem.rightNow')}
             state={isLive ? 'online' : 'offline'}
           />
         </div>
@@ -140,7 +140,7 @@ export function Dashboard() {
                 <p className="text-caption font-mono text-ink-muted">
                   {liveCase.caseNumber} · {liveCase.judge}
                   {liveFromStore && (
-                    <> · {speakerCount} speakers detected</>
+                    <> · {t('dashboard.speakersDetected', { count: speakerCount })}</>
                   )}
                 </p>
               </div>
@@ -148,7 +148,7 @@ export function Dashboard() {
             <div className="flex items-center gap-3 shrink-0">
               {liveFromStore && (
                 <div className="text-right">
-                  <p className="text-mono text-ink-muted">Elapsed</p>
+                  <p className="text-mono text-ink-muted">{t('dashboard.elapsed')}</p>
                   <p className="text-headline-md text-ink font-mono tabular-nums">
                     {formatDuration(elapsed)}
                   </p>
@@ -159,7 +159,7 @@ export function Dashboard() {
                 leftIcon={<Radio className="h-5 w-5" />}
                 onClick={() => navigate('/sessions')}
               >
-                Open Session
+                {t('dashboard.openSession')}
               </Button>
             </div>
           </div>

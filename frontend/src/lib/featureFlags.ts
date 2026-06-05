@@ -23,13 +23,22 @@ export const ENABLED_FEATURES = {
   // CP1 — Real-time backend wiring
   useBrowserSpeechStt: true, // local real microphone capture until the production STT API is ready
   useBackendStt: false, // CP1 legacy: FastAPI WebSocket client with scripted mock provider
+  useCloudAsrFinalPass: true, // voice-asr-cloud-main integration: final diarized transcript after Stop
 
   // Phase B — standalone upload + library pages
   upload: true, // /upload — drag-and-drop, optional case picker
   documentsLibrary: true, // /documents — table of my uploads (or all for judges)
+  ocrProcessing: true, // /ocr — OCR & Document Processing
+
+  // Phase 27 — SudAI-Law-UZ legal document analysis.
+  // Per-document "Analyze" button in DocumentPreview, per-case "AI Analyze all"
+  // in CaseDetail PageHeader, and the new "AI legal analysis" section in
+  // CaseRightPanel. Gated here so flipping to false reverts the entire
+  // surface to plain (pre-SudAI) behaviour in one place.
+  aiAnalysis: true,
 
   // CP2 — HIDDEN FOR MVP (do not enable until Checkpoint 2)
-  documents: false, // OCR & Document Processing
+  documents: false, // legacy CP2 flag, kept for compatibility
   aiSummary: false, // AI Summary Center
   notifications: false, // Judicial Notifications Center
   settings: false, // Platform Settings

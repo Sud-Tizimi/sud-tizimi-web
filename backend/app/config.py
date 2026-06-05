@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     openrouter_model: str = "mistralai/mistral-7b-instruct:free"
     openrouter_timeout_s: float = 4.0
 
+    # Cloud ASR integration (voice-asr-cloud-main).
+    # Used by /api/asr/* for final courtroom transcription on /sessions.
+    asr_provider: str = "local"  # local | openrouter | aistudio
+    asr_openrouter_model: str = "google/gemini-2.5-flash"
+    asr_aistudio_model: str = "gemini-2.5-pro"
+    asr_timeout_s: float = 600.0
+    local_asr_base_url: str = "https://asr.bot-dev.uz"
+    gemini_api_key: str = ""
+
     # ----- Phase A additions -----
 
     # MySQL (async via aiomysql). Default expects a local server.
@@ -46,6 +55,26 @@ class Settings(BaseSettings):
     storage_root: str = "uploads"
     max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
     allowed_upload_extensions: str = "pdf,docx,jpg,jpeg,png"
+
+    # ----- Phase 27 additions (SudAI-Law-UZ) -----
+
+    # SudAI provider
+    sudai_provider: str = "local"  # local | future_remote
+    sudai_timeout_s: float = 30.0
+    sudai_recommendation_threshold: float = 0.85
+    # Path to lexuz.db SQLite RAG corpus. None = use built-in fallback base.
+    lexuz_db_path: str = ""
+
+    # ----- Phase D additions (OCR — ported from UDIP) -----
+
+    # OCR provider priority. ``auto`` (default) tries Gemini → Paddle → Tesseract → Stub.
+    ocr_provider: str = "auto"  # auto | gemini | paddle | tesseract | stub
+    ocr_lang: str = "uzb+rus+eng"
+    ocr_min_confidence: float = 0.5
+    tesseract_cmd: str = ""  # absolute path to tesseract binary (auto-detect if empty)
+    tessdata_dir: str = ""  # TESSDATA_PREFIX override
+    # Gemini OCR (shares the same gemini_api_key as the ASR provider, but a different model is typical)
+    ocr_gemini_model: str = "gemini-2.5-pro"
 
     @field_validator("stt_provider")
     @classmethod
@@ -67,6 +96,33 @@ class Settings(BaseSettings):
                 "sqlite is not allowed in Phase A — set DATABASE_URL to mysql+aiomysql://…"
             )
         return v_stripped
+
+    @field_validator("sudai_provider")
+    @classmethod
+    def _validate_sudai_provider(cls, v: str) -> str:
+        allowed = {"local", "future_remote"}
+        v_lower = v.lower().strip()
+        if v_lower not in allowed:
+            raise ValueError(f"sudai_provider must be one of {allowed}, got {v!r}")
+        return v_lower
+
+    @field_validator("asr_provider")
+    @classmethod
+    def _validate_asr_provider(cls, v: str) -> str:
+        allowed = {"local", "openrouter", "aistudio"}
+        v_lower = v.lower().strip()
+        if v_lower not in allowed:
+            raise ValueError(f"asr_provider must be one of {allowed}, got {v!r}")
+        return v_lower
+
+    @field_validator("ocr_provider")
+    @classmethod
+    def _validate_ocr_provider(cls, v: str) -> str:
+        allowed = {"auto", "gemini", "paddle", "tesseract", "stub"}
+        v_lower = v.lower().strip()
+        if v_lower not in allowed:
+            raise ValueError(f"ocr_provider must be one of {allowed}, got {v!r}")
+        return v_lower
 
     @property
     def cors_origins_list(self) -> List[str]:

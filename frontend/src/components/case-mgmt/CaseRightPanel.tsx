@@ -13,14 +13,18 @@ import {
   FileSignature,
   Scale,
   History,
+  Pencil,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { CASE_STATUS_BADGE } from '@/lib/caseStyles';
 import { cn } from '@/lib/cn';
+import { CaseAIAnalysisPanel } from '@/components/case-mgmt/CaseAIAnalysisPanel';
+import { isEnabled } from '@/lib/featureFlags';
 import type { ActivityEvent, ActivityType, CaseDocument, Case } from '@/types/domain';
 
 const ACTIVITY_ICON: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
   case_created: FilePlus2,
+  case_edited: Pencil,
   documents_uploaded: Upload,
   documents_classified: Sparkles,
   case_submitted: Send,
@@ -28,6 +32,12 @@ const ACTIVITY_ICON: Record<ActivityType, React.ComponentType<{ className?: stri
   case_returned: CornerUpLeft,
   document_added: FilePlus2,
   document_removed: FileX2,
+  ai_document_analysis_requested: Sparkles,
+  ai_document_analysis_completed: Sparkles,
+  ai_document_analysis_failed: AlertCircle,
+  ai_case_analysis_requested: Sparkles,
+  ai_case_analysis_completed: Sparkles,
+  ai_case_analysis_failed: AlertCircle,
 };
 
 interface Props {
@@ -133,6 +143,16 @@ export function CaseRightPanel({ caseItem, selectedDoc, activity = [] }: Props) 
           </div>
         )}
       </section>
+
+      {/* SudAI legal analysis (Phase 27). Gated by feature flag so flipping
+          `aiAnalysis` to false fully reverts to pre-SudAI behaviour. */}
+      {isEnabled('aiAnalysis') && (
+        <CaseAIAnalysisPanel
+          caseId={caseItem.id}
+          selectedDocumentId={selectedDoc?.id ?? null}
+          selectedDocumentName={selectedDoc?.fileName ?? null}
+        />
+      )}
 
       {/* Timeline */}
       <section>

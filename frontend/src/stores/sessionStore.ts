@@ -9,6 +9,20 @@ export interface TranscriptEntry {
   text: string;
   isFinal: boolean;
   atMs: number;
+  startMs?: number;
+  endMs?: number;
+  confidence?: number;
+}
+
+export interface FinalTranscriptSegment {
+  speakerId: string;
+  speakerLabel: string;
+  shortLabel: string;
+  text: string;
+  atMs: number;
+  startMs?: number;
+  endMs?: number;
+  confidence?: number;
 }
 
 export interface ActiveSpeaker {
@@ -48,11 +62,13 @@ interface SessionState {
 
   upsertPartial: (speakerId: string, text: string, atMs: number) => void;
   commitFinalFor: (speakerId: string) => void;
+  replaceWithFinalSegments: (segments: FinalTranscriptSegment[]) => void;
   registerSpeaker: (id: string, label?: string, role?: SpeakerRole, shortLabel?: string) => void;
   setSpeakerSpeaking: (id: string, speaking: boolean) => void;
   setAudioLevel: (level: number) => void;
   setMuted: (muted: boolean) => void;
   goLive: () => void;
+  finish: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -101,6 +117,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     ),
 
   goLive: () => set({ lifecycle: 'live', startedAt: Date.now() }),
+  finish: () => set({ lifecycle: 'stopped', audioLevel: 0 }),
 
   upsertPartial: (speakerId, text, atMs) =>
     set((s) => {
@@ -142,6 +159,41 @@ export const useSessionStore = create<SessionState>((set) => ({
         speakers: s.speakers.map((sp) =>
           sp.id === speakerId ? { ...sp, isSpeaking: false } : sp,
         ),
+      };
+    }),
+
+  replaceWithFinalSegments: (segments) =>
+    set(() => {
+      const speakers: ActiveSpeaker[] = [];
+      const seen = new Set<string>();
+      const transcript: TranscriptEntry[] = segments.map((seg, index) => {
+        if (!seen.has(seg.speakerId)) {
+          seen.add(seg.speakerId);
+          speakers.push({
+            id: seg.speakerId,
+            label: seg.speakerLabel,
+            shortLabel: seg.shortLabel,
+            role: 'speaker',
+            isSpeaking: false,
+            lastSpokeAtMs: seg.atMs,
+          });
+        }
+        return {
+          id: `final-${index + 1}-${seg.speakerId}`,
+          speakerId: seg.speakerId,
+          text: seg.text,
+          isFinal: true,
+          atMs: seg.atMs,
+          startMs: seg.startMs,
+          endMs: seg.endMs,
+          confidence: seg.confidence,
+        };
+      });
+      return {
+        transcript,
+        speakers,
+        partialIndex: {},
+        audioLevel: 0,
       };
     }),
 

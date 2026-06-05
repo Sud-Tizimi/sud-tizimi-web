@@ -1,11 +1,17 @@
 import { useTranslation } from 'react-i18next';
-import { FileText, Download, Eye } from 'lucide-react';
+import { FileText, Download, Eye, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
+import { isEnabled } from '@/lib/featureFlags';
+import { useAnalyzeDocument } from '@/hooks/queries';
 import type { CaseDocument } from '@/types/domain';
 
 interface Props {
   document: CaseDocument | null;
+  /** Used by the "Analyze" button so the mutation can invalidate
+   * the case-level AI panel after a successful run. Optional — the
+   * button stays available even when not provided. */
+  caseId?: string | null;
   /** Phase A: there is no real download yet. Hidden in Phase A; the
    * button is rendered but disabled. Phase B will wire it to
    * `/api/documents/{id}/download`. */
@@ -18,8 +24,10 @@ interface Props {
  * removed) caseStore. The download button is disabled because no real file
  * is on disk in Phase A.
  */
-export function DocumentPreview({ document, downloadDisabled = true }: Props) {
+export function DocumentPreview({ document, caseId, downloadDisabled = true }: Props) {
   const { t } = useTranslation();
+  const analyzeMut = useAnalyzeDocument();
+  const showAnalyze = isEnabled('aiAnalysis') && !!document;
 
   if (!document) {
     return (
@@ -60,6 +68,26 @@ export function DocumentPreview({ document, downloadDisabled = true }: Props) {
         >
           Download
         </Button>
+        {showAnalyze && (
+          <Button
+            size="sm"
+            variant="secondary"
+            leftIcon={
+              analyzeMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )
+            }
+            disabled={analyzeMut.isPending}
+            onClick={() =>
+              document &&
+              analyzeMut.mutate({ documentId: document.id, caseId: caseId ?? null })
+            }
+          >
+            {t('aiAnalysis.buttonShort')}
+          </Button>
+        )}
       </div>
 
       {/* Body */}

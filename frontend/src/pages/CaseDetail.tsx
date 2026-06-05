@@ -19,6 +19,7 @@ import {
   X,
   Pencil,
   Trash,
+  Loader2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardHeader, CardTitle, Button, EmptyState, Badge } from '@/components/ui';
@@ -28,6 +29,7 @@ import { CaseRightPanel } from '@/components/case-mgmt/CaseRightPanel';
 import { CaseActionModal } from '@/components/case-mgmt/CaseActionModal';
 import { useAuth } from '@/hooks/useAuth';
 import {
+  useAnalyzeCase,
   useApproveCase,
   useCase,
   useCaseDocuments,
@@ -41,9 +43,9 @@ import {
   useAssistants,
   useActivity,
 } from '@/hooks/queries';
+import { isEnabled } from '@/lib/featureFlags';
 import { CASE_STATUS_BADGE } from '@/lib/caseStyles';
 import { cn } from '@/lib/cn';
-import type { ActivityEvent } from '@/types/domain';
 
 type Tab = 'documents' | 'timeline';
 
@@ -68,6 +70,7 @@ export function CaseDetail() {
   const returnMut = useReturnCase(id ?? '');
   const reopenMut = useReopenCase(id ?? '');
   const deleteMut = useDeleteCase();
+  const analyzeCaseMut = useAnalyzeCase();
 
   const [tab, setTab] = useState<Tab>('documents');
   const [modal, setModal] = useState<null | 'approve' | 'return'>(null);
@@ -215,6 +218,23 @@ export function CaseDetail() {
                 onClick={() => setModal('approve')}
               >
                 {t('caseMgmt.detail.actions.approve')}
+              </Button>
+            )}
+            {isEnabled('aiAnalysis') && caseItem.id && documents.length > 0 && (
+              <Button
+                variant="secondary"
+                size="md"
+                leftIcon={
+                  analyzeCaseMut.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )
+                }
+                onClick={() => analyzeCaseMut.mutate(caseItem.id)}
+                disabled={analyzeCaseMut.isPending}
+              >
+                {t('aiAnalysis.buttonAnalyzeAll')}
               </Button>
             )}
           </div>
@@ -393,7 +413,7 @@ export function CaseDetail() {
               </div>
             </CardHeader>
             <div className="flex-1 px-4 pb-4 min-h-0">
-              <DocumentPreview document={previewDoc} />
+              <DocumentPreview document={previewDoc} caseId={caseItem.id} />
             </div>
           </Card>
         </div>
@@ -504,10 +524,6 @@ function Tabs({
     </div>
   );
 }
-
-// Local ActivityEvent type re-export so the unused import doesn't trip
-// TypeScript (we re-import the type via the queries hook already).
-export type _CaseDetailActivityEvent = ActivityEvent;
 
 // ---------------------------------------------------------------------------
 // InlineUpload — case-scoped queue that posts files to /api/cases/{id}/documents.

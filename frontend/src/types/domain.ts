@@ -14,6 +14,33 @@ export interface SpeakerProfile {
   fullName?: string;
 }
 
+export interface ASRWord {
+  word: string;
+  start: string;
+  end: string;
+  confidence: number;
+}
+
+export interface ASRSegment {
+  id: number;
+  speaker: string;
+  start: string;
+  end: string;
+  text: string;
+  words: ASRWord[];
+}
+
+export interface ASRTranscriptionResponse {
+  provider: 'local' | 'openrouter' | 'aistudio' | string;
+  model: string;
+  speakersCount: number;
+  language: string;
+  duration: string;
+  fullTranscript: string;
+  processingTimeS: number;
+  segments: ASRSegment[];
+}
+
 // ---------------------------------------------------------------------------
 // Case Management & Document Review (CP2 module — implemented frontend-only)
 // Spec: Sud-Tizimi/case-management.md
@@ -109,13 +136,20 @@ export interface CaseDocument {
 
 export type ActivityType =
   | 'case_created'
+  | 'case_edited'
   | 'documents_uploaded'
   | 'documents_classified'
   | 'case_submitted'
   | 'case_approved'
   | 'case_returned'
   | 'document_added'
-  | 'document_removed';
+  | 'document_removed'
+  | 'ai_document_analysis_requested'
+  | 'ai_document_analysis_completed'
+  | 'ai_document_analysis_failed'
+  | 'ai_case_analysis_requested'
+  | 'ai_case_analysis_completed'
+  | 'ai_case_analysis_failed';
 
 export interface ActivityEvent {
   id: string;
@@ -176,6 +210,99 @@ export const I18N_NAMESPACES = [
   'documentType',
   'activity',
   'notification',
+  'aiAnalysis',
 ] as const;
 
 export type I18nNamespace = (typeof I18N_NAMESPACES)[number];
+
+// ---------------------------------------------------------------------------
+// SudAI-Law-UZ analysis (Phase 27)
+// ---------------------------------------------------------------------------
+
+export type AIAnalysisStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export type CaseLegalCategory =
+  | 'oilaviy_nizo'
+  | 'mehnat_nizosi'
+  | 'mamuriy_yoki_iqtisodiy_nizo'
+  | 'fuqarolik_ishi'
+  | 'umumiy_huquqiy_murojaat';
+
+export type ProcedureType =
+  | 'fuqarolik_sud'
+  | 'mamuriy_yoki_iqtisodiy_sud'
+  | 'sud_xodimi_aniqlaydi';
+
+export type DocumentLanguage = 'uzbek_latin' | 'uzbek_cyrillic_or_russian';
+
+export interface AIMatchedSource {
+  law: string;
+  article: string;
+  title: string;
+  excerpt: string;
+  relevance: number; // 0..1
+  sourceId?: string | null;
+  sourceUrl?: string | null;
+  categoryPath?: string | null;
+}
+
+export interface AIAnonymizationEntity {
+  label: string;
+  original: string;
+  placeholder: string;
+}
+
+export interface AIExtractedLegalObjects {
+  claimant?: string | null;
+  respondent?: string | null;
+  claimSubject?: string | null;
+  demandSummary?: string | null;
+  contractNumber?: string | null;
+  debtAmount?: string | null;
+  dates: string[];
+  attachments: string[];
+}
+
+export interface AIClassificationResult {
+  mainCategory: CaseLegalCategory;
+  subCategory: string;
+  procedureType: ProcedureType;
+  confidence: number; // 0..1
+}
+
+export interface AIRecommendation {
+  status: string;
+  recommendation: string;
+  risk: string;
+}
+
+export interface AIAnalysisResult {
+  metadata?: {
+    documentType: string;
+    language: DocumentLanguage;
+    pages: number;
+    ocrRequired: boolean;
+  };
+  anonymizedText?: string;
+  anonymizedEntities?: AIAnonymizationEntity[];
+  extractedObjects?: AIExtractedLegalObjects;
+  classification?: AIClassificationResult;
+  matchedSources?: AIMatchedSource[];
+  explanation?: string;
+  confidencePercent?: number;
+  humanReview?: AIRecommendation;
+  /** Case-level runs surface per-document failures (lexuz missing, OCR, …) here. */
+  subFailures?: { documentId: string; error: string }[];
+}
+
+export interface AIAnalysisRecord {
+  id: string;
+  caseId: string;
+  documentId?: string | null;
+  status: AIAnalysisStatus;
+  provider: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  errorMessage?: string | null;
+  result?: AIAnalysisResult | null;
+}
