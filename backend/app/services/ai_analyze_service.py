@@ -92,7 +92,7 @@ async def analyze_document(
 
     settings = get_settings()
     analysis = AIAnalysis(
-        case_id=doc.case_id or "",
+        case_id=doc.case_id,
         document_id=doc.id,
         requested_by_id=actor.id,
         status=AIAnalysisStatus.RUNNING,
@@ -127,6 +127,7 @@ async def analyze_document(
                 meta={"documentId": doc.id, "error": analysis.error_message},
             )
         await session.flush()
+        await session.commit()
         raise HTTPException(status_code=500, detail="ai_analysis_failed")
 
     analysis.result_json = result.model_dump(mode="json")
@@ -226,6 +227,7 @@ async def analyze_case_documents(
             meta={"documentCount": len(docs), "failures": sub_failures},
         )
         await session.flush()
+        await session.commit()
         raise HTTPException(status_code=500, detail="ai_analysis_failed:all_documents_failed")
 
     aggregated = aggregate_case_results(sub_results)

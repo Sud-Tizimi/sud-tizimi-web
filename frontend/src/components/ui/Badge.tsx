@@ -22,7 +22,7 @@ export function Badge({ variant = 'neutral', dot, className, children, ...rest }
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full border text-label-md uppercase tracking-wide whitespace-nowrap',
+        'inline-flex max-w-full items-center gap-1.5 px-2.5 py-1 min-h-6 rounded-full border text-label-md uppercase tracking-wide leading-tight whitespace-normal break-words text-left',
         VARIANT_STYLES[variant],
         className,
       )}

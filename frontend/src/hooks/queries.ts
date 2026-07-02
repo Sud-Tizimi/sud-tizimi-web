@@ -103,6 +103,7 @@ export interface OcrEngineStatus {
 
 type CaseApiResponse = Case | CaseOneResponse | StatusTransitionApiResponse;
 type DocumentApiResponse = CaseDocument | DocumentOneResponse;
+type DocumentScope = 'mine' | 'all';
 
 function unwrapCaseResponse(response: CaseApiResponse): Case {
   return 'case' in response ? response.case : response;
@@ -110,6 +111,31 @@ function unwrapCaseResponse(response: CaseApiResponse): Case {
 
 function unwrapDocumentResponse(response: DocumentApiResponse): CaseDocument {
   return 'document' in response ? response.document : response;
+}
+
+function prependDocument(
+  current: CaseDocument[] | undefined,
+  doc: CaseDocument,
+): CaseDocument[] {
+  return [doc, ...(current ?? []).filter((item) => item.id !== doc.id)];
+}
+
+function replaceDocument(
+  current: CaseDocument[] | undefined,
+  doc: CaseDocument,
+): CaseDocument[] | undefined {
+  if (!current) return current;
+  const index = current.findIndex((item) => item.id === doc.id);
+  if (index === -1) return current;
+  const next = [...current];
+  next[index] = doc;
+  return next;
+}
+
+function invalidateDocumentLists(qc: ReturnType<typeof useQueryClient>) {
+  (['mine', 'all'] as const satisfies readonly DocumentScope[]).forEach((scope) => {
+    qc.invalidateQueries({ queryKey: qk.documents(scope) });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +261,7 @@ export function useDeleteCase() {
       // under ``['documents', 'mine']`` etc.
       qc.invalidateQueries({ queryKey: qk.cases() });
       qc.invalidateQueries({ queryKey: ['case'] });
-      qc.invalidateQueries({ queryKey: ['documents'] });
+      invalidateDocumentLists(qc);
     },
   });
 }
@@ -393,13 +419,21 @@ export function useUploadDocument() {
       return unwrapDocumentResponse(await apiForm<DocumentApiResponse>(path, form));
     },
     onSuccess: (doc) => {
-      // Invalidate every documents scope + the case-scoped list. We do an
-      // explicit refetch on the case-scoped list because some upload paths
-      // (case detail /cases/{id}) need the new row to appear immediately,
-      // not just on the next focus/refetch trigger.
-      qc.invalidateQueries({ queryKey: ['documents'] });
+      // Update the visible library immediately so a successful upload never
+      // looks like it vanished while the follow-up refetch is still pending.
+      qc.setQueryData<CaseDocument[]>(qk.documents('mine'), (current) =>
+        prependDocument(current, doc),
+      );
+      qc.setQueryData<CaseDocument[] | undefined>(qk.documents('all'), (current) =>
+        prependDocument(current, doc),
+      );
+      invalidateDocumentLists(qc);
+      qc.refetchQueries({ queryKey: qk.documents('mine') });
       if (doc.caseId) {
         const caseId = doc.caseId;
+        qc.setQueryData<CaseDocument[]>(qk.caseDocuments(caseId), (current) =>
+          prependDocument(current, doc),
+        );
         qc.invalidateQueries({ queryKey: qk.caseDocuments(caseId) });
         qc.invalidateQueries({ queryKey: qk.case(caseId) });
         qc.invalidateQueries({ queryKey: qk.activity(caseId) });
@@ -423,7 +457,7 @@ export function useDeleteDocument() {
       // know which case the doc belonged to from here). The ``['case']``
       // prefix matches ``case detail``, ``case documents`` and
       // ``case activity`` keys — see the ``qk`` factory above.
-      qc.invalidateQueries({ queryKey: ['documents'] });
+      invalidateDocumentLists(qc);
       qc.invalidateQueries({ queryKey: ['case'] });
     },
   });
@@ -440,8 +474,17 @@ export function useAttachDocument() {
           body: { caseId: input.caseId },
         }),
       ),
-    onSuccess: (_doc, vars) => {
-      qc.invalidateQueries({ queryKey: ['documents'] });
+    onSuccess: (doc, vars) => {
+      qc.setQueryData<CaseDocument[] | undefined>(qk.documents('mine'), (current) =>
+        replaceDocument(current, doc),
+      );
+      qc.setQueryData<CaseDocument[] | undefined>(qk.documents('all'), (current) =>
+        replaceDocument(current, doc),
+      );
+      qc.setQueryData<CaseDocument[]>(qk.caseDocuments(vars.caseId), (current) =>
+        prependDocument(current, doc),
+      );
+      invalidateDocumentLists(qc);
       // Only invalidate the case-scoped keys for THIS case.
       qc.invalidateQueries({ queryKey: qk.caseDocuments(vars.caseId) });
       qc.invalidateQueries({ queryKey: qk.case(vars.caseId) });
@@ -456,10 +499,16 @@ export function useDetachDocument() {
   return useMutation({
     mutationFn: async (id: string) =>
       unwrapDocumentResponse(await api<DocumentApiResponse>(`/api/documents/${id}/detach`, { method: 'POST' })),
-    onSuccess: () => {
+    onSuccess: (doc) => {
+      qc.setQueryData<CaseDocument[] | undefined>(qk.documents('mine'), (current) =>
+        replaceDocument(current, doc),
+      );
+      qc.setQueryData<CaseDocument[] | undefined>(qk.documents('all'), (current) =>
+        replaceDocument(current, doc),
+      );
       // We don't know which case the doc belonged to from the detach
       // payload, so nuke the whole case subtree like Delete does.
-      qc.invalidateQueries({ queryKey: ['documents'] });
+      invalidateDocumentLists(qc);
       qc.invalidateQueries({ queryKey: ['case'] });
     },
   });

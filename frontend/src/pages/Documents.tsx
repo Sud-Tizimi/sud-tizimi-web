@@ -38,6 +38,8 @@ import {
 } from '@/hooks/queries';
 import type { CaseDocument, DocumentCategory } from '@/types/domain';
 
+const PILL_TEXT_CLASS = 'normal-case tracking-normal';
+
 type Scope = 'mine' | 'all';
 type StatusFilter = 'all' | 'orphan' | 'attached';
 
@@ -286,17 +288,19 @@ function DocumentRow({
         {formatBytes(doc.size)}
       </td>
       <td className="px-3 py-4 hidden lg:table-cell">
-        <span className="inline-flex items-center h-6 px-2 rounded text-caption font-medium bg-primary-50 text-primary-700">
+        <Badge variant="info" className={cn(PILL_TEXT_CLASS, 'max-w-[180px] rounded-xl')}>
           {t(`documentCategory.${doc.category}`)}
-        </span>
+        </Badge>
       </td>
       <td className="px-3 py-4">
         {doc.caseId ? (
-          <span className="inline-flex items-center h-6 px-2 rounded text-caption font-medium bg-emerald-50 text-emerald-600">
+          <Badge variant="success" className={cn(PILL_TEXT_CLASS, 'max-w-[180px] rounded-xl')}>
             {t('documents.status.attached', { caseNumber: caseNumberLabel ?? '…' })}
-          </span>
+          </Badge>
         ) : (
-          <Badge variant="warning">{t('documents.status.orphan')}</Badge>
+          <Badge variant="warning" className={PILL_TEXT_CLASS}>
+            {t('documents.status.orphan')}
+          </Badge>
         )}
       </td>
       <td className="px-3 py-4 text-caption font-mono text-ink-muted hidden sm:table-cell">

@@ -106,9 +106,9 @@ export function CaseRightPanel({ caseItem, selectedDoc, activity = [] }: Props) 
                 </span>
               </Row>
               <Row label={t('caseMgmt.detail.documents.aiCategory')}>
-                <span className="inline-flex items-center h-6 px-2 rounded text-caption font-medium bg-primary-50 text-primary-700">
+                <Badge variant="info" className="max-w-full rounded-xl normal-case tracking-normal">
                   {t(`documentCategory.${selectedDoc.category}`)}
-                </span>
+                </Badge>
               </Row>
               <div className="pt-3 border-t border-outline-soft">
                 <div className="flex items-center justify-between mb-1.5">
