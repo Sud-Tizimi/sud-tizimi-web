@@ -10,7 +10,6 @@ import {
   Sparkles,
   Bell,
   Settings as SettingsIcon,
-  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { ENABLED_FEATURES } from '@/lib/featureFlags';
@@ -44,14 +43,12 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex w-sidebar shrink-0 flex-col bg-navy-700 text-white">
       {/* Logo */}
-      <div className="h-16 px-6 flex items-center gap-3 border-b border-white/5">
-        <div className="h-9 w-9 rounded-md bg-primary-500 inline-flex items-center justify-center">
-          <ShieldCheck className="h-5 w-5 text-white" />
-        </div>
-        <div className="flex flex-col leading-tight">
-          <span className="text-body-lg font-semibold tracking-tight">{t('app.name')}</span>
-          <span className="text-caption text-white/50 uppercase tracking-wider">{t('app.tagline')}</span>
-        </div>
+      <div className="h-16 px-6 flex items-center border-b border-white/5">
+        <img
+          src="/brand/faysal-ai-logo-horizontal-dark.svg"
+          alt={t('app.name')}
+          className="h-10 w-auto max-w-full"
+        />
       </div>
 
       {/* Nav — CP1 only. CP2 items are commented above and restored on Checkpoint 2 / Phase B. */}

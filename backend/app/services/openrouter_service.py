@@ -50,8 +50,8 @@ class OpenRouterService:
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://sud-tizimi.local",
-                    "X-Title": "Sud-Tizimi STT Post-Processor",
+                    "HTTP-Referer": "https://faysal-ai.local",
+                    "X-Title": "Faysal AI STT Post-Processor",
                 },
             )
         return self._client

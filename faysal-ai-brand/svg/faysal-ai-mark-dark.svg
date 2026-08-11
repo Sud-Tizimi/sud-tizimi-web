@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Faysal AI mark for dark backgrounds</title>
+  <desc id="desc">White geometric F inside an open digital seal with cyan and gold accents.</desc>
+  <g fill="none" stroke-linecap="butt">
+    <path d="M230 54A202 202 0 0 0 54 256a202 202 0 0 0 176 202" stroke="#FFFFFF" stroke-width="22"/>
+    <path d="M282 54a202 202 0 0 1 176 202 202 202 0 0 1-176 202" stroke="#FFFFFF" stroke-width="22"/>
+    <path d="M230 78A178 178 0 0 0 78 256a178 178 0 0 0 152 178" stroke="#00A6E8" stroke-width="7"/>
+    <path d="M282 78a178 178 0 0 1 152 178 178 178 0 0 1-152 178" stroke="#00A6E8" stroke-width="7"/>
+  </g>
+  <path fill="#FFFFFF" d="M174 145h178v58H242v52h91v57h-91v73h-68z"/>
+  <circle cx="256" cy="458" r="15" fill="#D8A21B"/>
+</svg>

@@ -2,7 +2,7 @@ import type { Config } from 'tailwindcss';
 
 /**
  * Design system: "Justice Infrastructure"
- * Source: Stitch project 12139961574422030019 (Sud-Tizimi Dashboard).
+ * Source: Stitch project 12139961574422030019 (Faysal AI Dashboard).
  * Tokens are intentionally fixed here — do not loosen.
  */
 export default {

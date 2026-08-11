@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getUserMediaOrThrow, toMicrophoneIssue } from '@/lib/microphone';
 import type { ASRSegment, ASRTranscriptionResponse } from '@/types/domain';
 import type { FinalTranscriptSegment } from '@/stores/sessionStore';
 import { useSessionStore } from '@/stores/sessionStore';
@@ -108,8 +109,7 @@ export function useCloudAsrRecorder(active: boolean, language: string): CloudAsr
     setError(null);
     setResult(null);
 
-    void navigator.mediaDevices
-      ?.getUserMedia({ audio: true })
+    void getUserMediaOrThrow({ audio: true })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -127,7 +127,7 @@ export function useCloudAsrRecorder(active: boolean, language: string): CloudAsr
       })
       .catch((e) => {
         setState('error');
-        setError(e instanceof Error ? e.message : 'microphone_unavailable');
+        setError(toMicrophoneIssue(e));
       });
 
     return () => {

@@ -3,7 +3,7 @@
 The patterns are tuned for Uzbek formats (phone, passport, JSHSHIR/PINFL,
 STIR, addresses, F.I.Sh. with patronymic suffixes). Behaviour matches
 the original ``sudai-research-raw/app/services/anonymizer.py`` — only
-the schema import is rewired to live inside Sud-Tizimi.
+the schema import is rewired to live inside Faysal AI.
 """
 from __future__ import annotations
 

@@ -42,8 +42,8 @@ const NOTIFICATION_TRANSLATIONS: Record<string, string> = {
 const en = {
   translation: {
     app: {
-      name: 'Sud-Tizimi',
-      tagline: 'Judicial System',
+      name: 'Faysal AI',
+      tagline: 'Judicial Assistant',
     },
     nav: {
       dashboard: 'Dashboard',
@@ -267,6 +267,15 @@ const en = {
       tooltip: {
         confidenceLabel: 'Word confidence',
         playWord: 'Play word',
+      },
+      errors: {
+        secureContext: 'Microphone recording works only over HTTPS or localhost.',
+        unsupported: 'This browser does not support microphone access.',
+        recorderUnsupported: 'This browser cannot record audio in this mode.',
+        permissionDenied: 'Microphone access was blocked. Allow permission and try again.',
+        deviceMissing: 'No microphone was found on this device.',
+        deviceBusy: 'The microphone is busy in another app. Close it and try again.',
+        unavailable: 'Microphone is unavailable right now.',
       },
       downloadFilename: 'transcript.docx',
     },
@@ -631,8 +640,8 @@ const en = {
 const uz = {
   translation: {
     app: {
-      name: 'Sud-Tizimi',
-      tagline: 'Sud tizimi',
+      name: 'Faysal AI',
+      tagline: 'Sud yordamchisi',
     },
     nav: {
       dashboard: 'Boshqaruv paneli',
@@ -854,6 +863,15 @@ const uz = {
       tooltip: {
         confidenceLabel: 'Word confidence',
         playWord: 'Play word',
+      },
+      errors: {
+        secureContext: 'Mikrofondan yozish faqat HTTPS yoki localhost orqali ishlaydi.',
+        unsupported: 'Bu brauzer mikrofon bilan ishlashni qo‘llab-quvvatlamaydi.',
+        recorderUnsupported: 'Bu brauzer ushbu rejimda audio yozolmaydi.',
+        permissionDenied: 'Mikrofon ruxsati bloklangan. Ruxsat berib qayta urinib ko‘ring.',
+        deviceMissing: 'Ushbu qurilmada mikrofon topilmadi.',
+        deviceBusy: 'Mikrofon boshqa dasturda band. Uni yopib qayta urinib ko‘ring.',
+        unavailable: 'Hozir mikrofon mavjud emas.',
       },
       downloadFilename: 'transkripsiya.docx',
     },
@@ -1218,8 +1236,8 @@ const uz = {
 const ru = {
   translation: {
     app: {
-      name: 'Sud-Tizimi',
-      tagline: 'Судебная система',
+      name: 'Faysal AI',
+      tagline: 'Судебный ассистент',
     },
     nav: {
       dashboard: 'Панель управления',
@@ -1441,6 +1459,15 @@ const ru = {
       tooltip: {
         confidenceLabel: 'Word confidence',
         playWord: 'Play word',
+      },
+      errors: {
+        secureContext: 'Запись с микрофона работает только по HTTPS или на localhost.',
+        unsupported: 'Этот браузер не поддерживает доступ к микрофону.',
+        recorderUnsupported: 'Этот браузер не умеет записывать аудио в этом режиме.',
+        permissionDenied: 'Доступ к микрофону заблокирован. Разрешите его и попробуйте снова.',
+        deviceMissing: 'На этом устройстве не найден микрофон.',
+        deviceBusy: 'Микрофон занят другим приложением. Закройте его и попробуйте снова.',
+        unavailable: 'Микрофон сейчас недоступен.',
       },
       downloadFilename: 'transkript.docx',
     },

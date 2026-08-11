@@ -409,8 +409,8 @@ async def _transcribe_openrouter(
                 f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {settings.openrouter_api_key}",
-                    "HTTP-Referer": "https://sud-tizimi.local",
-                    "X-Title": "Sud-Tizimi ASR",
+                    "HTTP-Referer": "https://faysal-ai.local",
+                    "X-Title": "Faysal AI ASR",
                 },
                 json=payload,
             )

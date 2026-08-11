@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 declarative base for the Sud-Tizimi ORM."""
+"""SQLAlchemy 2.0 declarative base for the Faysal AI ORM."""
 from __future__ import annotations
 
 from datetime import datetime

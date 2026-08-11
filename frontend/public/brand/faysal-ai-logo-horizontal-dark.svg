@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 320" role="img" aria-labelledby="title desc">
+  <title id="title">Faysal AI horizontal logo for dark backgrounds</title>
+  <desc id="desc">Faysal AI white digital judicial seal and wordmark with cyan and gold accents.</desc>
+  <g transform="translate(18 18) scale(.555)">
+    <g fill="none" stroke-linecap="butt">
+      <path d="M230 54A202 202 0 0 0 54 256a202 202 0 0 0 176 202" stroke="#FFFFFF" stroke-width="22"/>
+      <path d="M282 54a202 202 0 0 1 176 202 202 202 0 0 1-176 202" stroke="#FFFFFF" stroke-width="22"/>
+      <path d="M230 78A178 178 0 0 0 78 256a178 178 0 0 0 152 178" stroke="#00A6E8" stroke-width="7"/>
+      <path d="M282 78a178 178 0 0 1 152 178 178 178 0 0 1-152 178" stroke="#00A6E8" stroke-width="7"/>
+    </g>
+    <path fill="#FFFFFF" d="M174 145h178v58H242v52h91v57h-91v73h-68z"/>
+    <circle cx="256" cy="458" r="15" fill="#D8A21B"/>
+  </g>
+  <text x="350" y="198" fill="#FFFFFF" font-family="DejaVu Sans, Arial, sans-serif" font-size="104" font-weight="600" letter-spacing="12">FAYSAL</text>
+  <text x="895" y="198" fill="#00A6E8" font-family="DejaVu Sans, Arial, sans-serif" font-size="104" font-weight="600" letter-spacing="8">AI</text>
+</svg>

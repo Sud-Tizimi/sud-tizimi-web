@@ -1,6 +1,6 @@
-# Sud-Tizimi Backend (CP1 MVP)
+# Faysal AI Backend (CP1 MVP)
 
-FastAPI backend for the Sud-Tizimi real-time court transcription platform.
+FastAPI backend for the Faysal AI real-time court transcription platform.
 
 ## Status
 

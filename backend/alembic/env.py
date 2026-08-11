@@ -1,6 +1,6 @@
 """Alembic env — async-aware.
 
-We import the Sud-Tizimi ``Base`` and ``settings`` directly so migrations
+We import the Faysal AI ``Base`` and ``settings`` directly so migrations
 don't have to duplicate the model definitions. ``DATABASE_URL`` is
 resolved from the app's pydantic-settings singleton.
 """

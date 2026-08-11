@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, Card, CardHeader, CardTitle } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { getMicrophoneIssue, getUserMediaOrThrow, toMicrophoneIssue, type MicrophoneIssue } from '@/lib/microphone';
 import type { ASRSegment, ASRTranscriptionResponse, ASRWord } from '@/types/domain';
 
 const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
@@ -80,6 +81,8 @@ export function Sessions() {
 
   const visibleSegments = editing ? editRows : result?.segments ?? [];
   const stats = useMemo(() => computeStats(result), [result]);
+  const liveRecordingIssue = getMicrophoneIssue();
+  const liveRecordingError = liveRecordingIssue ? describeMicrophoneIssue(t, liveRecordingIssue) : null;
 
   useEffect(() => {
     void loadLocalMeta();
@@ -147,18 +150,25 @@ export function Sessions() {
     setError(null);
     setState('idle');
     chunksRef.current = [];
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    recorderRef.current = recorder;
-    recorder.ondataavailable = (event) => {
-      if (event.data.size) chunksRef.current.push(event.data);
-    };
-    recorder.start(1000);
-    setRecording(true);
-    setRecordSecs(0);
-    startMeter(stream);
+    try {
+      const stream = await getUserMediaOrThrow({ audio: true });
+      streamRef.current = stream;
+      const mimeType = pickMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data);
+      };
+      recorder.start(1000);
+      setRecording(true);
+      setRecordSecs(0);
+      startMeter(stream);
+    } catch (e) {
+      cleanupMedia();
+      setRecording(false);
+      setError(describeMicrophoneIssue(t, toMicrophoneIssue(e)));
+      setState('error');
+    }
   }
 
   async function stopRecording() {
@@ -302,6 +312,11 @@ export function Sessions() {
                 <Field label={t('asr.languageLabel')}>
                   <input className={inputClass} value={liveLanguage} onChange={(e) => setLiveLanguage(e.target.value)} placeholder="Uzbek, English..." />
                 </Field>
+                {liveRecordingError && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-body-md text-amber-800">
+                    {liveRecordingError}
+                  </div>
+                )}
                 <div className="rounded-lg border border-outline-soft bg-surface-container-low p-5 text-center">
                   <div className={cn('mx-auto h-16 w-16 rounded-full border inline-flex items-center justify-center mb-3', recording ? 'bg-error-container border-error text-error animate-pulse-dot' : 'bg-white border-outline-soft text-ink-muted')}>
                     {recording ? <Square className="h-6 w-6 fill-current" /> : <Mic className="h-7 w-7" />}
@@ -311,7 +326,7 @@ export function Sessions() {
                   <p className="text-body-md text-ink-muted mt-1">{t('asr.liveStopHint')}</p>
                   <div className="flex justify-center gap-3 mt-5">
                     {!recording ? (
-                      <Button size="lg" leftIcon={<Mic className="h-4 w-4" />} onClick={() => void startRecording()}>{t('asr.liveStart')}</Button>
+                      <Button size="lg" disabled={Boolean(liveRecordingIssue)} leftIcon={<Mic className="h-4 w-4" />} onClick={() => void startRecording()}>{t('asr.liveStart')}</Button>
                     ) : (
                       <Button size="lg" variant="danger" leftIcon={<Square className="h-4 w-4 fill-current" />} onClick={() => void stopRecording()}>{t('asr.liveStop')}</Button>
                     )}
@@ -455,6 +470,25 @@ export function Sessions() {
       />
     </div>
   );
+}
+
+function describeMicrophoneIssue(t: (key: string) => string, issue: MicrophoneIssue): string {
+  switch (issue) {
+    case 'secure_context_required':
+      return t('asr.errors.secureContext');
+    case 'media_devices_unavailable':
+      return t('asr.errors.unsupported');
+    case 'media_recorder_unavailable':
+      return t('asr.errors.recorderUnsupported');
+    case 'microphone_permission_denied':
+      return t('asr.errors.permissionDenied');
+    case 'microphone_not_found':
+      return t('asr.errors.deviceMissing');
+    case 'microphone_in_use':
+      return t('asr.errors.deviceBusy');
+    default:
+      return t('asr.errors.unavailable');
+  }
 }
 
 const inputClass = 'h-10 w-full rounded-md border border-outline-soft bg-surface px-3 text-body-md text-ink outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15';

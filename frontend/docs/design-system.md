@@ -1,7 +1,7 @@
-# Sud-Tizimi — Design System Specification
+# Faysal AI — Design System Specification
 
 > **Source of truth:** This document is the formal extraction of the design system shipped in `frontend/tailwind.config.ts`, `frontend/src/styles/globals.css`, and the React component library under `frontend/src/components/`.
-> **Source identifier:** Stitch project `12139961574422030019` (Sud-Tizimi Dashboard).
+> **Source identifier:** Stitch project `12139961574422030019` (Faysal AI Dashboard).
 > **Design system name (internal):** *"Justice Infrastructure"*.
 > **Audience:** Multiple frontend teams implementing independent modules against the same platform.
 > **Stack:** React 18 + TypeScript + TailwindCSS 3.4 + Vite. Icons: `lucide-react`. Font: `@fontsource/inter` and `@fontsource/jetbrains-mono`.
@@ -1114,7 +1114,7 @@ The following are **non-negotiable invariants** that define the visual identity.
 - The focus ring recipe (§11.4).
 
 ### 14.3 Visual Identity Anchors
-The four elements that make the product *look like Sud-Tizimi* and not generic Bootstrap / Material / shadcn:
+The four elements that make the product *look like Faysal AI* and not generic Bootstrap / Material / shadcn:
 
 1. **The `navy-700` sidebar with a `primary-500` 2px active rail.**
 2. **The mono-uppercase table headers and the mono-tabular numerics throughout the data layer.**

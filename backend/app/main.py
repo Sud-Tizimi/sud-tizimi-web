@@ -60,10 +60,10 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="Sud-Tizimi API",
+        title="Faysal AI API",
         version="0.2.0",
         description=(
-            "Sud-Tizimi — real-time STT, speaker diarization, "
+            "Faysal AI — real-time STT, speaker diarization, "
             "case management with MySQL-backed accounts (Phase A)."
         ),
         lifespan=lifespan,

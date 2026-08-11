@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { getMicrophoneIssue, getUserMediaOrThrow, toMicrophoneIssue } from '@/lib/microphone';
 import { useSessionStore } from '@/stores/sessionStore';
 
 const LIVE_SPEAKER_ID = 'speaker-1';
@@ -109,9 +110,19 @@ export function useBrowserSpeechStt(active: boolean, language: string): void {
       console.warn('[browser-speech] Web Speech API is not supported in this browser');
     }
 
+    const microphoneIssue = getMicrophoneIssue();
+    if (microphoneIssue) {
+      // eslint-disable-next-line no-console
+      console.warn('[browser-speech] microphone unavailable', microphoneIssue);
+      return () => {
+        shouldRestartRef.current = false;
+        store.getState().setAudioLevel(0);
+        store.getState().setSpeakerSpeaking(LIVE_SPEAKER_ID, false);
+      };
+    }
+
     let cancelled = false;
-    void navigator.mediaDevices
-      ?.getUserMedia({ audio: true })
+    void getUserMediaOrThrow({ audio: true })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -138,7 +149,7 @@ export function useBrowserSpeechStt(active: boolean, language: string): void {
       })
       .catch((e) => {
         // eslint-disable-next-line no-console
-        console.warn('[browser-speech] microphone unavailable', e);
+        console.warn('[browser-speech] microphone unavailable', toMicrophoneIssue(e));
       });
 
     return () => {

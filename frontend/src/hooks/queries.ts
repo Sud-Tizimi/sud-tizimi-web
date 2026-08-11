@@ -1,5 +1,5 @@
 /**
- * TanStack Query hooks for the Sud-Tizimi API.
+ * TanStack Query hooks for the Faysal AI API.
  *
  * Conventions:
  * - All "use*" read hooks return the parsed data directly; if you're not

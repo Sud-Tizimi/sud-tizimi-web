@@ -43,7 +43,7 @@ export interface ASRTranscriptionResponse {
 
 // ---------------------------------------------------------------------------
 // Case Management & Document Review (CP2 module — implemented frontend-only)
-// Spec: Sud-Tizimi/case-management.md
+// Spec: Faysal AI/case-management.md
 // ---------------------------------------------------------------------------
 
 export type UserRole = 'judge' | 'assistant';
