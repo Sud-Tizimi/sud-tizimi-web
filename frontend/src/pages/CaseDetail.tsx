@@ -126,7 +126,11 @@ export function CaseDetail() {
   // the list view). The submit guard ``documents.length > 0`` is satisfied by
   // the server's own state machine; on the client we keep the button enabled
   // for the same states as before.
-  const canSubmit = isAssistantOwner && (caseItem.status === 'draft' || caseItem.status === 'returned');
+  const canSubmit = isAssistantOwner && (
+    caseItem.status === 'draft'
+    || caseItem.status === 'uploaded'
+    || caseItem.status === 'returned'
+  );
   const canApprove = isJudgeOwner && caseItem.status === 'under_review';
   const canReturn = isJudgeOwner && (caseItem.status === 'under_review' || caseItem.status === 'approved');
   const canReopen = isJudgeOwner && (caseItem.status === 'returned' || caseItem.status === 'approved');

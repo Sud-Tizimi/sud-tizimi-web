@@ -40,20 +40,36 @@ class AITextAnalysisRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AIDocumentMetadata(BaseModel):
+def _camel_case(value: str) -> str:
+    head, *tail = value.split("_")
+    return head + "".join(part.capitalize() for part in tail)
+
+
+class AIWireModel(BaseModel):
+    """Public SudAI DTO convention: camelCase on the HTTP boundary.
+
+    Pipeline and DB payloads use Pythonic snake_case. ``populate_by_name``
+    deliberately accepts those persisted payloads, while ``by_alias=True``
+    produces the TypeScript-facing contract in one place.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, alias_generator=_camel_case)
+
+
+class AIDocumentMetadata(AIWireModel):
     document_type: str
     language: DocumentLanguage
     pages: int
     ocr_required: bool
 
 
-class AIAnonymizationEntity(BaseModel):
+class AIAnonymizationEntity(AIWireModel):
     label: AnonymizationLabel
     original: str
     placeholder: str
 
 
-class AIExtractedLegalObjects(BaseModel):
+class AIExtractedLegalObjects(AIWireModel):
     claimant: Optional[str] = None
     respondent: Optional[str] = None
     claim_subject: Optional[str] = None
@@ -64,14 +80,14 @@ class AIExtractedLegalObjects(BaseModel):
     attachments: List[str] = []
 
 
-class AIClassificationResult(BaseModel):
+class AIClassificationResult(AIWireModel):
     main_category: CaseLegalCategory
     sub_category: str
     procedure_type: ProcedureType
     confidence: float
 
 
-class AIMatchedSource(BaseModel):
+class AIMatchedSource(AIWireModel):
     law: str
     article: str
     title: str
@@ -82,13 +98,13 @@ class AIMatchedSource(BaseModel):
     category_path: Optional[str] = None
 
 
-class AIRecommendation(BaseModel):
+class AIRecommendation(AIWireModel):
     status: str
     recommendation: str
     risk: str
 
 
-class AIAnalysisResponse(BaseModel):
+class AIAnalysisResponse(AIWireModel):
     """Envelope returned by ``app.services.ai_law.pipeline.analyze_*``."""
 
     metadata: AIDocumentMetadata
@@ -100,6 +116,23 @@ class AIAnalysisResponse(BaseModel):
     explanation: str
     confidence_percent: int
     human_review: AIRecommendation
+
+
+def analysis_result_to_api(result_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Convert the stored snake_case pipeline payload to the public DTO.
+
+    ``sub_failures`` is a case-level persistence extension rather than part of
+    the per-document pipeline response, so preserve it explicitly under the
+    same camelCase HTTP convention.
+    """
+    if result_json is None:
+        return None
+    result = AIAnalysisResponse.model_validate(result_json).model_dump(
+        mode="json", by_alias=True
+    )
+    if "sub_failures" in result_json:
+        result["subFailures"] = result_json["sub_failures"]
+    return result
 
 
 # ---------------------------------------------------------------------------

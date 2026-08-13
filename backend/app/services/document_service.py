@@ -69,19 +69,29 @@ async def _read_into_storage(
     ensure_storage_root()
     written = 0
     chunk_size = 64 * 1024
-    async with aiofiles.open(dest, "wb") as f:
-        while True:
-            chunk = await file.read(chunk_size)
-            if not chunk:
-                break
-            written += len(chunk)
-            if written > max_bytes:
-                await f.close()
-                delete_file_silently(dest)
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"audio_too_large:max_{max_bytes}_bytes",
-                )
+    # Never expose a partially written upload under the final storage path.
+    # ``document_id`` makes the final name unique; the extra suffix isolates
+    # interrupted writes until every chunk has reached disk.
+    temporary_dest = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.partial")
+    try:
+        async with aiofiles.open(temporary_dest, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"audio_too_large:max_{max_bytes}_bytes",
+                    )
+                await f.write(chunk)
+        # Atomic rename: a Document row is created only after the complete
+        # file is available at its final path.
+        temporary_dest.replace(dest)
+    except BaseException:
+        delete_file_silently(temporary_dest)
+        raise
     return written
 
 

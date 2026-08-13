@@ -41,11 +41,10 @@ async def trigger_case_analysis(
         session, actor=user, case_id=case_id
     )
     await session.commit()
-    # Re-fetch via list to honour the response shape consistently.
-    records = await ai_analyze_service.list_analyses_for_case(
-        session, actor=user, case_id=case_id
-    )
-    return records[0] if records else _to_record(analysis)
+    await session.refresh(analysis)
+    # Return the exact row created by this operation. Re-querying a mixed
+    # history by position previously allowed a document-level result to win.
+    return ai_analyze_service.analysis_record_to_schema(analysis)
 
 
 @case_router.get("", response_model=AIAnalysisRecordList)
@@ -75,10 +74,8 @@ async def trigger_document_analysis(
         session, actor=user, document_id=document_id
     )
     await session.commit()
-    records = await ai_analyze_service.list_analyses_for_document(
-        session, actor=user, document_id=document_id
-    )
-    return records[0] if records else _to_record(analysis)
+    await session.refresh(analysis)
+    return ai_analyze_service.analysis_record_to_schema(analysis)
 
 
 @doc_router.get("", response_model=AIAnalysisRecordList)
@@ -95,22 +92,3 @@ async def list_document_analyses(
 
 # Backwards-compat alias for any consumer that imports the old ``router`` name.
 router = case_router
-
-
-def _to_record(analysis) -> AIAnalysisRecord:
-    """Convert an in-memory :class:`AIAnalysis` ORM row to the API record.
-
-    Used only as a fallback when the post-commit re-list returns empty
-    (should not happen in practice — defence in depth).
-    """
-    return AIAnalysisRecord(
-        id=analysis.id,
-        caseId=analysis.case_id,
-        documentId=analysis.document_id,
-        status=analysis.status.value if hasattr(analysis.status, "value") else str(analysis.status),
-        provider=analysis.provider,
-        startedAt=analysis.started_at,
-        finishedAt=analysis.finished_at,
-        errorMessage=analysis.error_message,
-        result=analysis.result_json,
-    )

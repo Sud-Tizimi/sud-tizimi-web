@@ -22,7 +22,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..api.schemas.ai_analysis import AIAnalysisRecord, AIAnalysisResponse
+from ..api.schemas.ai_analysis import (
+    AIAnalysisRecord,
+    AIAnalysisResponse,
+    analysis_result_to_api,
+)
 from ..config import get_settings
 from ..core.enums import ActivityType, AIAnalysisStatus, UserRole
 from ..core.storage import resolve_storage_path
@@ -262,7 +266,8 @@ async def analyze_case_documents(
 # ---------------------------------------------------------------------------
 
 
-def _record_to_schema(row: AIAnalysis) -> AIAnalysisRecord:
+def analysis_record_to_schema(row: AIAnalysis) -> AIAnalysisRecord:
+    """Build the sole DB/internal → public analysis-record DTO boundary."""
     return AIAnalysisRecord(
         id=row.id,
         caseId=row.case_id,
@@ -272,21 +277,25 @@ def _record_to_schema(row: AIAnalysis) -> AIAnalysisRecord:
         startedAt=row.started_at,
         finishedAt=row.finished_at,
         errorMessage=row.error_message,
-        result=row.result_json,
+        result=analysis_result_to_api(row.result_json),
     )
 
 
 async def list_analyses_for_case(
     session: AsyncSession, *, actor: User, case_id: str
 ) -> List[AIAnalysisRecord]:
-    """Return case-scope analyses, newest first. Scope check first."""
+    """Return only case-level analyses, newest first with a stable tie-break.
+
+    Per-document records are available only through the document endpoint;
+    otherwise a case panel can accidentally render a document result.
+    """
     await case_service.get_case_in_scope(session, case_id, actor)
     res = await session.execute(
         select(AIAnalysis)
-        .where(AIAnalysis.case_id == case_id)
-        .order_by(AIAnalysis.started_at.desc())
+        .where(AIAnalysis.case_id == case_id, AIAnalysis.document_id.is_(None))
+        .order_by(AIAnalysis.started_at.desc(), AIAnalysis.id.desc())
     )
-    return [_record_to_schema(r) for r in res.scalars().all()]
+    return [analysis_record_to_schema(r) for r in res.scalars().all()]
 
 
 async def list_analyses_for_document(
@@ -303,9 +312,9 @@ async def list_analyses_for_document(
     res = await session.execute(
         select(AIAnalysis)
         .where(AIAnalysis.document_id == document_id)
-        .order_by(AIAnalysis.started_at.desc())
+        .order_by(AIAnalysis.started_at.desc(), AIAnalysis.id.desc())
     )
-    return [_record_to_schema(r) for r in res.scalars().all()]
+    return [analysis_record_to_schema(r) for r in res.scalars().all()]
 
 
 async def get_latest_for_case(

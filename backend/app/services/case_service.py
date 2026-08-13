@@ -238,11 +238,11 @@ async def delete_case(
 async def submit_case(
     session: AsyncSession, *, case_id: str, actor: User
 ) -> Case:
-    """draft|returned → under_review. Actor must be the case's assistant."""
+    """draft|uploaded|returned → under_review. Actor must be the case's assistant."""
     case = await get_case_in_scope(session, case_id, actor)
     if actor.role != UserRole.ASSISTANT or case.assistant_id != actor.id:
         raise HTTPException(status_code=403, detail="forbidden")
-    if case.status not in (CaseStatus.DRAFT, CaseStatus.RETURNED):
+    if case.status not in (CaseStatus.DRAFT, CaseStatus.UPLOADED, CaseStatus.RETURNED):
         raise HTTPException(status_code=409, detail="invalid_transition")
 
     case.status = CaseStatus.UNDER_REVIEW
