@@ -274,7 +274,14 @@ def _build_backend(lang: str, cfg: dict):
             return backend
         except Exception as exc:
             _log.warning("Gemini backend unavailable, falling back to local: %s", exc)
-    for builder in (_PaddleBackend, _TesseractBackend):
+    # Honour an explicit local provider.  This matters to callers that need a
+    # deterministic, offline-only OCR path (the document-analysis pipeline).
+    builders = (
+        (_TesseractBackend,)
+        if cfg.get("ocr_provider") == "tesseract"
+        else (_PaddleBackend, _TesseractBackend)
+    )
+    for builder in builders:
         try:
             backend = builder(lang)
             _log.info("OCR backend: %s (lang=%s)", backend.name, lang)
@@ -289,12 +296,17 @@ class OcrEngine:
     """Public OCR facade."""
 
     def __init__(self) -> None:
-        self._backends: dict[str, object] = {}
+        self._backends: dict[tuple[str, bool], object] = {}
 
-    def _current_backend(self, lang: str):
+    def _current_backend(self, lang: str, *, local_only: bool = False):
         provider = _settings.ocr_provider
+        # Document extraction must never send judicial documents to a cloud
+        # provider.  In that mode, use the already supported local Tesseract
+        # backend regardless of a Gemini-capable global OCR configuration.
+        if local_only:
+            effective = "tesseract"
         # "auto" — use Gemini only if its key is configured
-        if provider == "auto":
+        elif provider == "auto":
             effective = "gemini" if _settings.gemini_api_key else "tesseract"
         else:
             effective = provider
@@ -303,9 +315,10 @@ class OcrEngine:
             "gemini_api_key": _settings.gemini_api_key,
             "gemini_model": _settings.ocr_gemini_model,
         }
-        if lang not in self._backends:
-            self._backends[lang] = _build_backend(lang, cfg)
-        return self._backends[lang]
+        cache_key = (lang, local_only)
+        if cache_key not in self._backends:
+            self._backends[cache_key] = _build_backend(lang, cfg)
+        return self._backends[cache_key]
 
     def recognize(
         self,
@@ -313,10 +326,11 @@ class OcrEngine:
         *,
         lang: str | None = None,
         preprocess: bool = True,
+        local_only: bool = False,
     ) -> OcrOutput:
         """Recognise text in a single image."""
         lang = lang or _settings.ocr_lang
-        backend = self._current_backend(lang)
+        backend = self._current_backend(lang, local_only=local_only)
         path = str(image_path)
         if preprocess and getattr(backend, "wants_preprocess", True):
             path = preprocess_image(path)

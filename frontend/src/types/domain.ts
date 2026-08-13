@@ -282,6 +282,8 @@ export interface AIAnalysisResult {
     language: DocumentLanguage;
     pages: number;
     ocrRequired: boolean;
+    extractionMethod?: 'text' | 'ocr';
+    ocrUsed?: boolean;
   };
   anonymizedText?: string;
   anonymizedEntities?: AIAnonymizationEntity[];

@@ -33,6 +33,7 @@ from app.db.models.document import Document
 from app.db.models.user import User
 from app.main import app
 from app.services import document_service
+from app.services.ocr import engine as ocr_engine_module
 
 
 class _ChunkedUpload:
@@ -117,7 +118,18 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
         cls.password = "integration-password-123"
         cls.storage_root = tempfile.mkdtemp(prefix="faysal-upload-e2e-")
         cls.previous_storage_root = os.environ.get("STORAGE_ROOT")
+        cls.previous_ocr_lang = os.environ.get("OCR_LANG")
+        cls.previous_ocr_provider = os.environ.get("OCR_PROVIDER")
         os.environ["STORAGE_ROOT"] = cls.storage_root
+        # The local developer image has the English traineddata pack.  The
+        # production default remains configurable as uzb+rus+eng.
+        os.environ["OCR_LANG"] = "eng"
+        os.environ["OCR_PROVIDER"] = "tesseract"
+        cls.previous_engine_lang = ocr_engine_module._settings.ocr_lang
+        cls.previous_engine_provider = ocr_engine_module._settings.ocr_provider
+        ocr_engine_module._settings.ocr_lang = "eng"
+        ocr_engine_module._settings.ocr_provider = "tesseract"
+        ocr_engine_module.ocr_engine._backends.clear()
         get_settings.cache_clear()
         asyncio.run(cls._provision_users())
         cls.client = TestClient(app)
@@ -185,6 +197,17 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
                 os.environ.pop("STORAGE_ROOT", None)
             else:
                 os.environ["STORAGE_ROOT"] = cls.previous_storage_root
+            if cls.previous_ocr_lang is None:
+                os.environ.pop("OCR_LANG", None)
+            else:
+                os.environ["OCR_LANG"] = cls.previous_ocr_lang
+            if cls.previous_ocr_provider is None:
+                os.environ.pop("OCR_PROVIDER", None)
+            else:
+                os.environ["OCR_PROVIDER"] = cls.previous_ocr_provider
+            ocr_engine_module._settings.ocr_lang = cls.previous_engine_lang
+            ocr_engine_module._settings.ocr_provider = cls.previous_engine_provider
+            ocr_engine_module.ocr_engine._backends.clear()
             get_settings.cache_clear()
 
     @staticmethod
@@ -223,6 +246,20 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
         finally:
             await engine.dispose()
 
+    async def _latest_analysis_for_document(self, document_id: str) -> AIAnalysis | None:
+        engine = create_async_engine(get_settings().database_url)
+        try:
+            async with AsyncSession(engine) as session:
+                rows = await session.execute(
+                    select(AIAnalysis)
+                    .where(AIAnalysis.document_id == document_id)
+                    .order_by(AIAnalysis.started_at.desc(), AIAnalysis.id.desc())
+                    .limit(1)
+                )
+                return rows.scalar_one_or_none()
+        finally:
+            await engine.dispose()
+
     @staticmethod
     def _analysis_files() -> list[tuple[str, bytes, str]]:
         import fitz
@@ -251,6 +288,51 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
                 docx_buffer.getvalue(),
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ),
+        ]
+
+    @staticmethod
+    def _ocr_image_bytes(image_format: str, *, blank: bool = False) -> bytes:
+        from PIL import Image, ImageDraw, ImageFont
+
+        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 64)
+        image = Image.new("RGB", (1800, 520), "white")
+        if not blank:
+            ImageDraw.Draw(image).multiline_text(
+                (70, 70),
+                "FAYSAL OCR CLAIM\nDEBT CONTRACT REVIEW\nAMOUNT 1500000 UZS",
+                fill="black",
+                font=font,
+                spacing=28,
+            )
+        buffer = BytesIO()
+        image.save(buffer, image_format)
+        return buffer.getvalue()
+
+    @classmethod
+    def _ocr_files(cls) -> list[tuple[str, bytes, str, str]]:
+        import fitz
+
+        jpg = cls._ocr_image_bytes("JPEG")
+        png = cls._ocr_image_bytes("PNG")
+        scanned_pdf = fitz.open()
+        page = scanned_pdf.new_page(width=1200, height=420)
+        page.insert_image(page.rect, stream=png)
+        scanned_pdf_bytes = scanned_pdf.tobytes()
+        scanned_pdf.close()
+
+        text_pdf = fitz.open()
+        page = text_pdf.new_page()
+        page.insert_text(
+            (72, 72),
+            "Da'vo arizasi qarzdorlikni undirish va shartnoma majburiyati.",
+        )
+        text_pdf_bytes = text_pdf.tobytes()
+        text_pdf.close()
+        return [
+            ("visible-text.jpg", jpg, "image/jpeg", "ocr"),
+            ("visible-text.png", png, "image/png", "ocr"),
+            ("scanned.pdf", scanned_pdf_bytes, "application/pdf", "ocr"),
+            ("text-layer.pdf", text_pdf_bytes, "application/pdf", "text"),
         ]
 
     def _assistant_headers(self) -> dict[str, str]:
@@ -398,3 +480,56 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in first_records], [r["id"] for r in second_records])
         self.assertEqual(first_records[0]["id"], case_record["id"])
         self.assertTrue(all(record["documentId"] is None for record in first_records))
+
+    def test_local_ocr_e2e_for_images_and_scanned_pdf(self) -> None:
+        """Real API + storage + Tesseract regression (not a mocked OCR test)."""
+        headers = self._assistant_headers()
+        case_id = self._create_case(headers, "OCR")
+
+        for filename, content, content_type, expected_method in self._ocr_files():
+            upload = self.client.post(
+                f"/api/cases/{case_id}/documents",
+                headers=headers,
+                files={"file": (filename, content, content_type)},
+            )
+            self.assertEqual(upload.status_code, 201, upload.text)
+            document_id = upload.json()["id"]
+
+            response = self.client.post(
+                f"/api/documents/{document_id}/analysis", headers=headers
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            record = response.json()
+            self.assertEqual(record["status"], "done")
+            self.assertEqual(record["documentId"], document_id)
+            self.assertTrue(record["result"]["anonymizedText"])
+            metadata = record["result"]["metadata"]
+            self.assertEqual(metadata["extractionMethod"], expected_method)
+            self.assertEqual(metadata["ocrUsed"], expected_method == "ocr")
+            self.assertEqual(metadata["ocrRequired"], expected_method == "ocr")
+
+            stored = asyncio.run(self._get_analysis(record["id"]))
+            self.assertIsNotNone(stored)
+            assert stored is not None
+            self.assertEqual(
+                stored.result_json["metadata"]["extraction_method"], expected_method
+            )
+
+        blank = self._ocr_image_bytes("PNG", blank=True)
+        upload = self.client.post(
+            f"/api/cases/{case_id}/documents",
+            headers=headers,
+            files={"file": ("blank.png", blank, "image/png")},
+        )
+        self.assertEqual(upload.status_code, 201, upload.text)
+        blank_document_id = upload.json()["id"]
+        response = self.client.post(
+            f"/api/documents/{blank_document_id}/analysis", headers=headers
+        )
+        self.assertEqual(response.status_code, 500, response.text)
+        failed = asyncio.run(self._latest_analysis_for_document(blank_document_id))
+        self.assertIsNotNone(failed)
+        assert failed is not None
+        self.assertEqual(failed.status.value, "failed")
+        self.assertIsNone(failed.result_json)
+        self.assertIn("ocr_text_is_empty", failed.error_message or "")

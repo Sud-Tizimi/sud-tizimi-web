@@ -61,6 +61,8 @@ class AIDocumentMetadata(AIWireModel):
     language: DocumentLanguage
     pages: int
     ocr_required: bool
+    extraction_method: str = "text"
+    ocr_used: bool = False
 
 
 class AIAnonymizationEntity(AIWireModel):

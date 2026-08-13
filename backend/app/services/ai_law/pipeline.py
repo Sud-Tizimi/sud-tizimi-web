@@ -24,7 +24,7 @@ from app.api.schemas.ai_analysis import (
 from app.core.enums import DocumentLanguage
 from app.services.ai_law.anonymizer import anonymize
 from app.services.ai_law.classifier import classify, detect_document_type
-from app.services.ai_law.document_loader import extract_text_from_file
+from app.services.ai_law.document_loader import extract_text_for_analysis
 from app.services.ai_law.extractor import extract_legal_objects
 from app.services.ai_law.rag import retrieve_sources
 from app.services.ai_law.reasoner import build_explanation, build_recommendation
@@ -42,8 +42,15 @@ async def analyze_document(
     """
     async with aiofiles.open(file_path, "rb") as f:
         content = await f.read()
-    text, ocr_required, pages = extract_text_from_file(content, filename)
-    return _analyze(text, filename=filename, pages=pages, ocr_required=ocr_required)
+    extracted = await extract_text_for_analysis(content, file_path, filename)
+    return _analyze(
+        extracted.text,
+        filename=filename,
+        pages=extracted.pages,
+        ocr_required=extracted.ocr_used,
+        extraction_method=extracted.extraction_method,
+        ocr_used=extracted.ocr_used,
+    )
 
 
 async def analyze_text(
@@ -51,10 +58,24 @@ async def analyze_text(
     filename: Optional[str] = None,
 ) -> AIAnalysisResponse:
     """Run the pipeline against pre-extracted text (no file IO)."""
-    return _analyze(text, filename=filename or "plain-text", pages=1, ocr_required=False)
+    return _analyze(
+        text,
+        filename=filename or "plain-text",
+        pages=1,
+        ocr_required=False,
+        extraction_method="text",
+        ocr_used=False,
+    )
 
 
-def _analyze(text: str, filename: str, pages: int, ocr_required: bool) -> AIAnalysisResponse:
+def _analyze(
+    text: str,
+    filename: str,
+    pages: int,
+    ocr_required: bool,
+    extraction_method: str,
+    ocr_used: bool,
+) -> AIAnalysisResponse:
     anonymized_text, entities = anonymize(text)
     classification = classify(anonymized_text)
     category_hint = " ".join(
@@ -70,7 +91,9 @@ def _analyze(text: str, filename: str, pages: int, ocr_required: bool) -> AIAnal
         document_type=detect_document_type(anonymized_text),
         language=_detect_language(anonymized_text),
         pages=pages,
-        ocr_required=ocr_required or _looks_like_image(filename),
+        ocr_required=ocr_required,
+        extraction_method=extraction_method,
+        ocr_used=ocr_used,
     )
 
     return AIAnalysisResponse(
@@ -92,14 +115,3 @@ def _detect_language(text: str) -> DocumentLanguage:
     if cyrillic > latin:
         return DocumentLanguage.UZBEK_CYRILLIC_OR_RUSSIAN
     return DocumentLanguage.UZBEK_LATIN
-
-
-def _looks_like_image(filename: str) -> bool:
-    return Path(filename).suffix.lower() in {
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".tiff",
-        ".bmp",
-        ".webp",
-    }

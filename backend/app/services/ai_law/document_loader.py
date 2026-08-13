@@ -1,20 +1,54 @@
-"""Bytes → text extraction for PDF, DOCX, and TXT files.
+"""Document text extraction for the local SudAI pipeline.
 
-Behaviour matches the original ``sudai-research-raw`` loader. Returns
-``(text, ocr_required, pages)`` — when ``ocr_required`` is True the
-caller should hand off to the OCR pipeline (currently a CP2 stub in
-``app.cp2_stubs.ocr_service``).
+Text-based PDF and DOCX files keep their lightweight in-memory parsers.
+Images and PDFs without meaningful embedded text are delegated to the existing
+local OCR adapter.  Raw image bytes are never decoded as UTF-8 text.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Tuple
+
+from app.config import get_settings
+from app.services.ocr_service import process_document
+
+
+_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_MIN_MEANINGFUL_CHARS = 20
+_MIN_MEANINGFUL_WORDS = 3
+
+
+class DocumentExtractionError(RuntimeError):
+    """Raised when no meaningful text can be extracted from a document."""
+
+
+@dataclass(frozen=True)
+class ExtractedDocumentText:
+    text: str
+    pages: int
+    extraction_method: str
+    ocr_used: bool
+
+
+def has_meaningful_text(text: str) -> bool:
+    """Return whether text is substantial enough to analyse.
+
+    The threshold avoids treating a PDF artefact or an empty OCR result as a
+    successful analysis while still allowing ordinary multi-word legal text.
+    """
+    normalized = " ".join(text.split())
+    words = re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)
+    return len(normalized) >= _MIN_MEANINGFUL_CHARS and len(words) >= _MIN_MEANINGFUL_WORDS
 
 
 def extract_text_from_file(content: bytes, filename: str) -> Tuple[str, bool, int]:
-    """Extract text from the file. Falls back to UTF-8 decode on unknown
-    extensions and flags the document as OCR-required.
+    """Fast text-only extractor kept for existing PDF/DOCX callers.
+
+    Image files deliberately return no text; their binary content must pass
+    through :func:`extract_text_for_analysis` and OCR instead.
     """
     suffix = Path(filename).suffix.lower()
 
@@ -27,8 +61,58 @@ def extract_text_from_file(content: bytes, filename: str) -> Tuple[str, bool, in
     if suffix == ".docx":
         return _extract_docx_text(content)
 
-    # Unknown extension: best-effort decode, mark as OCR-required.
+    if suffix in _IMAGE_SUFFIXES:
+        return "", True, 1
+
+    # Plain-text fallback is appropriate only for a non-image unknown file.
     return content.decode("utf-8", errors="ignore"), True, 1
+
+
+async def extract_text_for_analysis(
+    content: bytes,
+    file_path: Path,
+    filename: str,
+) -> ExtractedDocumentText:
+    """Extract meaningful text for AI analysis, invoking local OCR if needed."""
+    suffix = Path(filename).suffix.lower()
+    text, _ocr_required, pages = extract_text_from_file(content, filename)
+
+    if suffix == ".pdf":
+        # A normal PDF stays on the fast pypdf path.  OCR is a fallback only
+        # when the aggregate text layer is absent or practically empty.
+        if has_meaningful_text(text):
+            return ExtractedDocumentText(text, pages, "text", False)
+        return await _extract_with_local_ocr(file_path, suffix)
+
+    if suffix in _IMAGE_SUFFIXES:
+        return await _extract_with_local_ocr(file_path, suffix)
+
+    if suffix in {".docx", ".txt"}:
+        if has_meaningful_text(text):
+            return ExtractedDocumentText(text, pages, "text", False)
+        raise DocumentExtractionError("document_text_is_empty")
+
+    raise DocumentExtractionError(f"unsupported_document_type:{suffix or 'unknown'}")
+
+
+async def _extract_with_local_ocr(file_path: Path, suffix: str) -> ExtractedDocumentText:
+    """Run the project's existing OCR service without any cloud backend."""
+    result = await process_document(
+        str(file_path),
+        suffix.lstrip("."),
+        lang=get_settings().ocr_lang,
+        local_only=True,
+        # Pre-processing otherwise writes a sibling ``*_pre.png`` next to the
+        # stored upload.  Tesseract still applies its in-memory variants.
+        preprocess=False,
+    )
+    pages = result.get("pages", [])
+    text = "\n".join(
+        str(page.get("text") or "").strip() for page in pages if page.get("text")
+    ).strip()
+    if not has_meaningful_text(text):
+        raise DocumentExtractionError("ocr_text_is_empty")
+    return ExtractedDocumentText(text, max(len(pages), 1), "ocr", True)
 
 
 def _extract_pdf_text(content: bytes) -> Tuple[str, bool, int]:
