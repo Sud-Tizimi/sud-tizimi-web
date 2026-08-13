@@ -15,6 +15,7 @@ This is the only layer that knows about both
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -35,8 +36,20 @@ from ..db.models.case import Case
 from ..db.models.document import Document
 from ..db.models.user import User
 from ..services.ai_law.aggregator import aggregate_case_results
+from ..services.ai_law.document_loader import DocumentExtractionError
 from ..services.ai_law.pipeline import analyze_document as pipeline_analyze_document
 from . import activity_service, case_service, document_service
+
+_log = logging.getLogger(__name__)
+
+_SAFE_EXTRACTION_ERRORS = {"document_text_is_empty", "ocr_text_is_empty"}
+
+
+def _safe_analysis_error(exc: Exception) -> str:
+    """Return a client-safe persisted error code without leaking provider detail."""
+    if isinstance(exc, DocumentExtractionError) and str(exc) in _SAFE_EXTRACTION_ERRORS:
+        return str(exc)
+    return "analysis_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +130,14 @@ async def analyze_document(
 
     try:
         result: AIAnalysisResponse = await pipeline_analyze_document(path, doc.file_name)
-    except Exception as exc:  # noqa: BLE001 — surface any pipeline error as 500
+    except Exception as exc:  # noqa: BLE001 — client response stays generic
+        _log.warning(
+            "sudai_document_analysis_failed document_id=%s error_type=%s",
+            doc.id,
+            type(exc).__name__,
+        )
         analysis.status = AIAnalysisStatus.FAILED
-        analysis.error_message = f"{type(exc).__name__}: {exc}"[:1024]
+        analysis.error_message = _safe_analysis_error(exc)
         analysis.finished_at = datetime.utcnow()
         if case is not None:
             await activity_service.record_event(
@@ -214,7 +232,12 @@ async def analyze_case_documents(
         try:
             sub = await pipeline_analyze_document(path, doc.file_name)
         except Exception as exc:  # noqa: BLE001 — one bad doc doesn't fail the whole batch
-            sub_failures.append({"documentId": doc.id, "error": f"{type(exc).__name__}: {exc}"})
+            _log.warning(
+                "sudai_case_document_analysis_failed document_id=%s error_type=%s",
+                doc.id,
+                type(exc).__name__,
+            )
+            sub_failures.append({"documentId": doc.id, "error": _safe_analysis_error(exc)})
             continue
         sub_results.append(sub)
 

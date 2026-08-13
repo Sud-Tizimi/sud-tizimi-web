@@ -13,9 +13,9 @@ HTTP router returns to the frontend; the heavy AI result lives inside
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums import (
     AnonymizationLabel,
@@ -101,9 +101,41 @@ class AIMatchedSource(AIWireModel):
 
 
 class AIRecommendation(AIWireModel):
+    model_config = ConfigDict(
+        populate_by_name=True, alias_generator=_camel_case, extra="forbid"
+    )
+
     status: str
     recommendation: str
     risk: str
+
+
+class AILegalFinding(AIWireModel):
+    """A model finding whose legal assertions cite only retrieval source IDs."""
+
+    model_config = ConfigDict(
+        populate_by_name=True, alias_generator=_camel_case, extra="forbid"
+    )
+
+    kind: Literal["document_fact", "legal_assessment", "insufficient_context"]
+    statement: str = Field(min_length=1, max_length=4000)
+    source_ids: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _legal_assessments_require_sources(self):
+        if self.kind == "legal_assessment" and not self.source_ids:
+            raise ValueError("legal_assessment_requires_source_ids")
+        return self
+
+
+class AIAnalysisTechnicalMetadata(AIWireModel):
+    """Execution data, deliberately separated from legal conclusions."""
+
+    analysis_mode: Literal["local", "llm"] = "local"
+    provider: str = "local"
+    model: Optional[str] = None
+    latency_ms: Optional[int] = None
+    token_usage: Optional[dict[str, int]] = None
 
 
 class AIAnalysisResponse(AIWireModel):
@@ -118,6 +150,24 @@ class AIAnalysisResponse(AIWireModel):
     explanation: str
     confidence_percent: int
     human_review: AIRecommendation
+    findings: List[AILegalFinding] = Field(default_factory=list)
+    technical_metadata: AIAnalysisTechnicalMetadata = Field(
+        default_factory=AIAnalysisTechnicalMetadata
+    )
+
+
+class AIReasoningOutput(AIWireModel):
+    """The only structured shape accepted from an LLM provider."""
+
+    model_config = ConfigDict(
+        populate_by_name=True, alias_generator=_camel_case, extra="forbid"
+    )
+
+    explanation: str = Field(min_length=1, max_length=8000)
+    confidence_percent: int = Field(ge=0, le=100)
+    human_review: AIRecommendation
+    findings: List[AILegalFinding] = Field(default_factory=list)
+    context_sufficient: bool
 
 
 def analysis_result_to_api(result_json: dict[str, Any] | None) -> dict[str, Any] | None:

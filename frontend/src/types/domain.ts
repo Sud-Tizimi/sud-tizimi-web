@@ -276,6 +276,20 @@ export interface AIRecommendation {
   risk: string;
 }
 
+export interface AILegalFinding {
+  kind: 'document_fact' | 'legal_assessment' | 'insufficient_context';
+  statement: string;
+  sourceIds: string[];
+}
+
+export interface AIAnalysisTechnicalMetadata {
+  analysisMode: 'local' | 'llm';
+  provider: string;
+  model?: string | null;
+  latencyMs?: number | null;
+  tokenUsage?: Record<string, number> | null;
+}
+
 export interface AIAnalysisResult {
   metadata?: {
     documentType: string;
@@ -293,6 +307,8 @@ export interface AIAnalysisResult {
   explanation?: string;
   confidencePercent?: number;
   humanReview?: AIRecommendation;
+  findings?: AILegalFinding[];
+  technicalMetadata?: AIAnalysisTechnicalMetadata;
   /** Case-level runs surface per-document failures (lexuz missing, OCR, …) here. */
   subFailures?: { documentId: string; error: string }[];
 }

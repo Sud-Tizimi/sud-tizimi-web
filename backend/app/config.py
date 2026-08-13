@@ -58,9 +58,14 @@ class Settings(BaseSettings):
 
     # ----- Phase 27 additions (SudAI-Law-UZ) -----
 
-    # SudAI provider
-    sudai_provider: str = "local"  # local | future_remote
+    # SudAI legal-analysis provider. ``remote`` uses an OpenAI-compatible
+    # chat-completions endpoint; ``local`` remains entirely deterministic.
+    sudai_provider: str = "local"  # local | remote
     sudai_timeout_s: float = 30.0
+    sudai_base_url: str = ""
+    sudai_api_key: str = ""
+    sudai_model: str = ""
+    sudai_max_context_chars: int = 24_000
     sudai_recommendation_threshold: float = 0.85
     # Path to lexuz.db SQLite RAG corpus. None = use built-in fallback base.
     lexuz_db_path: str = ""
@@ -100,7 +105,7 @@ class Settings(BaseSettings):
     @field_validator("sudai_provider")
     @classmethod
     def _validate_sudai_provider(cls, v: str) -> str:
-        allowed = {"local", "future_remote"}
+        allowed = {"local", "remote"}
         v_lower = v.lower().strip()
         if v_lower not in allowed:
             raise ValueError(f"sudai_provider must be one of {allowed}, got {v!r}")
