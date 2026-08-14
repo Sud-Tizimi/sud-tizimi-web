@@ -3,7 +3,7 @@
  * "AI classification" section and the timeline. Phase 27 (SudAI-Law-UZ).
  *
  * Two views:
- *  - "Case-level" — runs / results for the whole case (aggregated SudAI).
+ *  - "Case-level" — factual-first synthesis and reasoning for the whole case.
  *  - "Document"   — runs / results for a specific document (only shown when
  *                   the user has selected a document in the left panel).
  *
@@ -34,7 +34,13 @@ import {
   useDocumentAnalysis,
 } from '@/hooks/queries';
 import { isEnabled } from '@/lib/featureFlags';
-import type { AIAnalysisRecord, AIAnalysisResult, CaseLegalCategory } from '@/types/domain';
+import type {
+  AIAnalysisRecord,
+  AIAnalysisResult,
+  AICaseAmountType,
+  AICaseLegalDomain,
+  CaseLegalCategory,
+} from '@/types/domain';
 
 interface Props {
   caseId: string;
@@ -51,6 +57,26 @@ const CATEGORY_LABEL_KEY: Record<CaseLegalCategory, string> = {
   mamuriy_yoki_iqtisodiy_nizo: 'aiCategory.mamuriy_yoki_iqtisodiy_nizo',
   fuqarolik_ishi: 'aiCategory.fuqarolik_ishi',
   umumiy_huquqiy_murojaat: 'aiCategory.umumiy_huquqiy_murojaat',
+};
+
+const CASE_DOMAIN_LABEL_KEY: Record<AICaseLegalDomain, string> = {
+  criminal_property: 'aiCaseDomain.criminal_property',
+  civil_debt: 'aiCaseDomain.civil_debt',
+  family: 'aiCaseDomain.family',
+  labor: 'aiCaseDomain.labor',
+  tax: 'aiCaseDomain.tax',
+  administrative: 'aiCaseDomain.administrative',
+  unknown: 'aiCaseDomain.unknown',
+};
+
+const AMOUNT_TYPE_LABEL_KEY: Record<AICaseAmountType, string> = {
+  asset_value: 'aiAnalysis.amountType.assetValue',
+  sale_price: 'aiAnalysis.amountType.salePrice',
+  payment: 'aiAnalysis.amountType.payment',
+  debt: 'aiAnalysis.amountType.debt',
+  damage: 'aiAnalysis.amountType.damage',
+  salary: 'aiAnalysis.amountType.salary',
+  unknown: 'aiAnalysis.amountType.unknown',
 };
 
 export function CaseAIAnalysisPanel({
@@ -205,11 +231,36 @@ function ResultCard({ record }: { record: AIAnalysisRecord }) {
   const result = record.result;
   if (!result) return null;
 
+  const isCaseLevel = record.documentId == null;
   const classification = result.classification;
-  const confidence = result.confidencePercent ?? Math.round((classification?.confidence ?? 0) * 100);
+  const candidateDomains = isCaseLevel
+    ? result.candidateLegalDomains?.length
+      ? result.candidateLegalDomains
+      : (result.factualSynthesis?.candidateLegalDomains ?? [])
+    : [];
+  const primaryDomain = candidateDomains[0];
+  const confidence =
+    result.confidencePercent ??
+    Math.round((primaryDomain?.confidence ?? classification?.confidence ?? 0) * 100);
   const recommendation = result.humanReview;
   const sources = result.matchedSources ?? [];
   const objects = result.extractedObjects;
+  const evidenceSummary = result.evidenceSummary?.length
+    ? result.evidenceSummary
+    : (result.factualSynthesis?.facts.map((fact) => fact.statement) ?? []);
+  const timeline = result.timeline?.length
+    ? result.timeline
+    : (result.factualSynthesis?.timeline ?? []);
+  const uncertainties = result.uncertainties?.length
+    ? result.uncertainties
+    : (result.factualSynthesis?.uncertainties ?? []);
+  const typedAmounts = result.typedAmounts?.length
+    ? result.typedAmounts
+    : (result.factualSynthesis?.amounts ?? []);
+  const hasInsufficientContext =
+    result.findings?.some((finding) => finding.kind === 'insufficient_context') ?? false;
+  const requiresManualSourceReview = isCaseLevel && sources.length === 0 && hasInsufficientContext;
+  const showLegacyExtractedObjects = !isCaseLevel || !result.factualSynthesis;
   const isHumanReview = recommendation?.status === 'qoʻlda tekshirish kerak' || recommendation?.status === 'qo\'lda tekshirish kerak';
 
   return (
@@ -224,16 +275,27 @@ function ResultCard({ record }: { record: AIAnalysisRecord }) {
         </div>
       )}
 
-      {/* Classification + confidence */}
-      {classification && (
+      {/* Canonical case domain (legacy classification is the fallback). */}
+      {(primaryDomain || classification) && (
         <div>
-          <p className="text-mono text-ink-muted mb-1.5">{t('aiAnalysis.classificationTitle')}</p>
+          <p className="text-mono text-ink-muted mb-1.5">
+            {t(primaryDomain ? 'aiAnalysis.caseDomainTitle' : 'aiAnalysis.classificationTitle')}
+          </p>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-title-lg text-ink font-semibold leading-tight">
-                {t(CATEGORY_LABEL_KEY[classification.mainCategory] ?? CATEGORY_LABEL_KEY.umumiy_huquqiy_murojaat)}
+                {primaryDomain
+                  ? t(CASE_DOMAIN_LABEL_KEY[primaryDomain.domain])
+                  : t(
+                      CATEGORY_LABEL_KEY[classification!.mainCategory] ??
+                        CATEGORY_LABEL_KEY.umumiy_huquqiy_murojaat,
+                    )}
               </p>
-              <p className="text-caption text-ink-muted mt-0.5">{classification.subCategory}</p>
+              {(primaryDomain?.rationale || classification?.subCategory) && (
+                <p className="text-caption text-ink-muted mt-0.5">
+                  {primaryDomain?.rationale ?? classification?.subCategory}
+                </p>
+              )}
             </div>
             {recommendation && (
               <Badge variant={isHumanReview ? 'warning' : 'info'} dot>
@@ -265,11 +327,114 @@ function ResultCard({ record }: { record: AIAnalysisRecord }) {
               </div>
             </div>
           )}
+          {candidateDomains.length > 1 && (
+            <div className="mt-3">
+              <p className="text-caption text-ink-muted mb-1.5">
+                {t('aiAnalysis.candidateDomainsTitle')}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {candidateDomains.map((candidate) => (
+                  <Badge key={candidate.domain} variant="neutral">
+                    {t(CASE_DOMAIN_LABEL_KEY[candidate.domain])}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Factual-first case result. Document-level cards keep their old layout. */}
+      {isCaseLevel && result.primaryConclusion && (
+        <div>
+          <p className="text-mono text-ink-muted mb-1.5">
+            {t('aiAnalysis.primaryConclusionTitle')}
+          </p>
+          <p className="text-body-md text-ink leading-relaxed">{result.primaryConclusion}</p>
+        </div>
+      )}
+
+      {isCaseLevel && evidenceSummary.length > 0 && (
+        <div>
+          <p className="text-mono text-ink-muted mb-1.5">
+            {t('aiAnalysis.evidenceSummaryTitle')}
+          </p>
+          <ul className="list-disc pl-5 space-y-1 text-body-md text-ink">
+            {evidenceSummary.map((statement, index) => (
+              <li key={`${index}-${statement.slice(0, 40)}`} className="leading-relaxed">
+                {statement}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {isCaseLevel && timeline.length > 0 && (
+        <div>
+          <p className="text-mono text-ink-muted mb-1.5">{t('aiAnalysis.timelineTitle')}</p>
+          <ol className="space-y-2">
+            {timeline.map((event) => (
+              <li key={`${event.sequence}-${event.event}`} className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface-container text-caption font-mono text-ink-muted">
+                  {event.sequence}
+                </span>
+                <p className="text-body-md text-ink leading-relaxed">{event.event}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {isCaseLevel && typedAmounts.length > 0 && (
+        <div>
+          <p className="text-mono text-ink-muted mb-1.5">
+            {t('aiAnalysis.typedAmountsTitle')}
+          </p>
+          <dl className="grid grid-cols-1 gap-y-2">
+            {typedAmounts.map((amount, index) => (
+              <div key={`${amount.amountType}-${amount.amount}-${index}`}>
+                <dt className="text-caption text-ink-muted">
+                  {t(AMOUNT_TYPE_LABEL_KEY[amount.amountType])}
+                </dt>
+                <dd className="text-body-md text-ink font-medium">{amount.amount}</dd>
+                <dd className="text-caption text-ink-muted leading-relaxed">{amount.context}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
+      {isCaseLevel && uncertainties.length > 0 && (
+        <div>
+          <p className="text-mono text-ink-muted mb-1.5">
+            {t('aiAnalysis.uncertaintiesTitle')}
+          </p>
+          <ul className="list-disc pl-5 space-y-1 text-body-md text-ink-muted">
+            {uncertainties.map((uncertainty, index) => (
+              <li key={`${index}-${uncertainty.slice(0, 40)}`} className="leading-relaxed">
+                {uncertainty}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
       {/* Recommendation text */}
-      {recommendation && (
+      {requiresManualSourceReview ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 flex items-start gap-2">
+          <AlertCircle className="h-3.5 w-3.5 text-amber-700 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-body-md font-medium text-amber-800">
+              {t('aiAnalysis.manualLegalSourcesRequired')}
+            </p>
+            {recommendation?.risk && (
+              <p className="text-caption text-amber-700 mt-1 leading-relaxed">
+                {recommendation.risk}
+              </p>
+            )}
+          </div>
+        </div>
+      ) : recommendation ? (
         <div>
           <p className="text-mono text-ink-muted mb-1.5">{t('aiAnalysis.recommendationTitle')}</p>
           <p className="text-body-md text-ink leading-relaxed">{recommendation.recommendation}</p>
@@ -279,7 +444,7 @@ function ResultCard({ record }: { record: AIAnalysisRecord }) {
             </p>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Matched legal sources */}
       {sources.length > 0 && (
@@ -323,7 +488,7 @@ function ResultCard({ record }: { record: AIAnalysisRecord }) {
       )}
 
       {/* Extracted legal objects */}
-      {objects && hasAnyExtracted(objects) && (
+      {showLegacyExtractedObjects && objects && hasAnyExtracted(objects) && (
         <div>
           <p className="text-mono text-ink-muted mb-1.5">{t('aiAnalysis.extractedTitle')}</p>
           <dl className="grid grid-cols-1 gap-y-1.5 text-body-md">

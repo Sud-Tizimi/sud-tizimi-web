@@ -19,6 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.schemas.ai_analysis import (
     AIClassificationResult,
+    AICaseDocumentInput,
+    AICaseFactualSynthesis,
+    AICaseReasoningOutput,
     AIDocumentMetadata,
     AIExtractedLegalObjects,
     AIMatchedSource,
@@ -45,6 +48,36 @@ Rules:
    human review.
 7. Separate document facts from legal interpretation.  Be conservative with
    confidence and require human review when uncertainty remains.
+"""
+
+CASE_SYNTHESIS_SYSTEM_PROMPT = """You are Faysal AI's factual case-synthesis component.
+Return only a JSON object matching the requested schema; no markdown.
+
+Rules:
+1. Treat every supplied document as part of one case while preserving document boundaries.
+2. Extract facts, timeline, entities, typed amounts, cross-document evidence links,
+   candidate legal domains/issues, retrieval terms, and uncertainties.
+3. Every fact, event, amount, entity, and evidence link must reference supplied document IDs.
+4. Do not cite, name, invent, or reason from statutes, articles, decisions, URLs, or legal sources.
+5. Type money by its local factual context. Asset value, sale price, payment, debt,
+   damage, and salary are different concepts; incidental personal debt is not a debt claim.
+6. Candidate domains are retrieval hypotheses, not final legal conclusions.
+7. Do not omit a document merely because its facts are corroborative rather than conclusive.
+"""
+
+CASE_REASONING_SYSTEM_PROMPT = """You are Faysal AI's case-level legal reasoning component.
+Return only a JSON object matching the requested schema; no markdown.
+
+Rules:
+1. Reason over the complete supplied factual synthesis, not isolated documents.
+2. Treat the supplied retrieval context as the complete set of trusted legal sources.
+3. Never invent a law, article, decision, URL, fact, or source ID.
+4. Every legal_assessment must cite one or more supplied source IDs.
+5. document_fact findings must not cite legal source IDs.
+6. If sources do not support the primary candidate domain, return an
+   insufficient_context finding, context_sufficient=false, and require human review.
+7. Do not replace an unsupported domain with an unrelated domain merely because its
+   sources are available. Separate factual conclusion from legal qualification.
 """
 
 
@@ -85,6 +118,23 @@ class AIProviderRequest(BaseModel):
     legal_context: list[LegalContextSource]
 
 
+class AICaseSynthesisProviderRequest(BaseModel):
+    """First case pass: bounded documents only, with no legal source context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    documents: list[AICaseDocumentInput] = Field(min_length=1)
+
+
+class AICaseReasoningProviderRequest(BaseModel):
+    """Second case pass: validated synthesis plus backend-owned legal sources."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    synthesis: AICaseFactualSynthesis
+    legal_context: list[LegalContextSource]
+
+
 @dataclass(frozen=True)
 class AIProviderResult:
     """Raw JSON payload plus safe execution metadata from a provider."""
@@ -98,6 +148,14 @@ class AIProviderResult:
 
 class AIProvider(Protocol):
     async def analyze(self, request: AIProviderRequest) -> AIProviderResult: ...
+
+    async def synthesize_case(
+        self, request: AICaseSynthesisProviderRequest
+    ) -> AIProviderResult: ...
+
+    async def analyze_case(
+        self, request: AICaseReasoningProviderRequest
+    ) -> AIProviderResult: ...
 
 
 class LocalAIProvider:
@@ -142,6 +200,34 @@ class LocalAIProvider:
         }
         return AIProviderResult(
             payload=payload,
+            provider="local",
+            model=None,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+        )
+
+    async def synthesize_case(
+        self, request: AICaseSynthesisProviderRequest
+    ) -> AIProviderResult:
+        from app.services.ai_law.case_synthesis import synthesize_case_locally
+
+        started = time.perf_counter()
+        synthesis = synthesize_case_locally(request.documents)
+        return AIProviderResult(
+            payload=synthesis.model_dump(mode="json"),
+            provider="local",
+            model=None,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+        )
+
+    async def analyze_case(
+        self, request: AICaseReasoningProviderRequest
+    ) -> AIProviderResult:
+        from app.services.ai_law.case_synthesis import reason_case_locally
+
+        started = time.perf_counter()
+        reasoning = reason_case_locally(request.synthesis, request.legal_context)
+        return AIProviderResult(
+            payload=reasoning.model_dump(mode="json"),
             provider="local",
             model=None,
             latency_ms=round((time.perf_counter() - started) * 1000),
@@ -206,6 +292,94 @@ class OpenAICompatibleProvider:
                         ensure_ascii=False,
                     ),
                 },
+            ],
+        }
+        try:
+            timeout = httpx.Timeout(self._timeout_s)
+            async with httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=timeout,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            ) as client:
+                response = await asyncio.wait_for(
+                    client.post("/chat/completions", json=payload), timeout=self._timeout_s
+                )
+        except asyncio.TimeoutError as exc:
+            raise ProviderTimeoutError("remote_provider_timeout") from exc
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("remote_provider_timeout") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError("remote_provider_connection_error") from exc
+
+        if response.status_code >= 400:
+            _log.warning("sudai_remote_http_error status=%s", response.status_code)
+            raise ProviderError("remote_provider_http_error")
+        try:
+            body = response.json()
+            content = ((body.get("choices") or [])[0].get("message") or {}).get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("empty_content")
+            parsed = json.loads(content)
+        except (ValueError, IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ProviderResponseError("remote_provider_invalid_json") from exc
+
+        usage = body.get("usage") if isinstance(body, dict) else None
+        token_usage = (
+            {key: int(value) for key, value in usage.items() if isinstance(value, int)}
+            if isinstance(usage, dict)
+            else None
+        )
+        return AIProviderResult(
+            payload=parsed,
+            provider="openai_compatible",
+            model=self._model,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            token_usage=token_usage,
+        )
+
+    async def synthesize_case(
+        self, request: AICaseSynthesisProviderRequest
+    ) -> AIProviderResult:
+        user_payload = {
+            "documents": [
+                document.model_dump(mode="json", by_alias=True)
+                for document in request.documents
+            ],
+            "requiredJsonSchema": AICaseFactualSynthesis.model_json_schema(by_alias=True),
+        }
+        return await self._complete_case_json(CASE_SYNTHESIS_SYSTEM_PROMPT, user_payload)
+
+    async def analyze_case(
+        self, request: AICaseReasoningProviderRequest
+    ) -> AIProviderResult:
+        user_payload = {
+            "factualSynthesis": request.synthesis.model_dump(mode="json", by_alias=True),
+            "legalContext": [
+                source.model_dump(mode="json") for source in request.legal_context
+            ],
+            "requiredJsonSchema": AICaseReasoningOutput.model_json_schema(by_alias=True),
+        }
+        return await self._complete_case_json(CASE_REASONING_SYSTEM_PROMPT, user_payload)
+
+    async def _complete_case_json(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+    ) -> AIProviderResult:
+        """Make one structured case call without exposing credentials or raw errors."""
+        self._assert_configured()
+        serialized = json.dumps(user_payload, ensure_ascii=False)
+        if len(serialized) > self._max_context_chars:
+            raise ProviderResponseError("case_context_too_large")
+
+        started = time.perf_counter()
+        payload = {
+            "model": self._model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": serialized},
             ],
         }
         try:

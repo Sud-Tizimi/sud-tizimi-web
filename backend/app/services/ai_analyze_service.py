@@ -7,8 +7,8 @@ This is the only layer that knows about both
 
 * :func:`analyze_document` — analyse a single document. Permission: any
   user in the case's scope (judge assigned, or owning assistant).
-* :func:`analyze_case_documents` — analyse every document attached to a
-  case and aggregate. Same permission rules.
+* :func:`analyze_case_documents` — synthesize and analyse all documents as one
+  case. Same permission rules.
 * :func:`list_analyses_for_case` / :func:`list_analyses_for_document` —
   history for the AI panel.
 * :func:`get_latest_*` — convenience for the UI's "last result" view.
@@ -35,14 +35,21 @@ from ..db.models.ai_analysis import AIAnalysis
 from ..db.models.case import Case
 from ..db.models.document import Document
 from ..db.models.user import User
-from ..services.ai_law.aggregator import aggregate_case_results
+from ..services.ai_law.case_pipeline import (
+    CaseDocumentSource,
+    analyze_case_documents as pipeline_analyze_case_documents,
+)
 from ..services.ai_law.document_loader import DocumentExtractionError
 from ..services.ai_law.pipeline import analyze_document as pipeline_analyze_document
 from . import activity_service, case_service, document_service
 
 _log = logging.getLogger(__name__)
 
-_SAFE_EXTRACTION_ERRORS = {"document_text_is_empty", "ocr_text_is_empty"}
+_SAFE_EXTRACTION_ERRORS = {
+    "document_text_is_empty",
+    "ocr_text_is_empty",
+    "all_documents_failed",
+}
 
 
 def _safe_analysis_error(exc: Exception) -> str:
@@ -174,14 +181,14 @@ async def analyze_document(
 
 
 # ---------------------------------------------------------------------------
-# Per-case (aggregated)
+# Per-case (factual synthesis → retrieval → reasoning)
 # ---------------------------------------------------------------------------
 
 
 async def analyze_case_documents(
     session: AsyncSession, *, actor: User, case_id: str
 ) -> AIAnalysis:
-    """Run SudAI on every document attached to a case, then aggregate.
+    """Run the dedicated two-pass case pipeline over all attached documents.
 
     Permission mirrors per-document. Empty case (no docs) is a 400.
     """
@@ -215,8 +222,8 @@ async def analyze_case_documents(
         meta={"documentCount": len(docs)},
     )
 
-    sub_results: List[AIAnalysisResponse] = []
     sub_failures: list[dict[str, str]] = []
+    sources: list[CaseDocumentSource] = []
     for doc in docs:
         if not doc.storage_path:
             sub_failures.append({"documentId": doc.id, "error": "file_missing"})
@@ -229,19 +236,15 @@ async def analyze_case_documents(
         if not path.exists():
             sub_failures.append({"documentId": doc.id, "error": "seeded_file_no_bytes"})
             continue
-        try:
-            sub = await pipeline_analyze_document(path, doc.file_name)
-        except Exception as exc:  # noqa: BLE001 — one bad doc doesn't fail the whole batch
-            _log.warning(
-                "sudai_case_document_analysis_failed document_id=%s error_type=%s",
-                doc.id,
-                type(exc).__name__,
+        sources.append(
+            CaseDocumentSource(
+                document_id=doc.id,
+                filename=doc.file_name,
+                file_path=path,
             )
-            sub_failures.append({"documentId": doc.id, "error": _safe_analysis_error(exc)})
-            continue
-        sub_results.append(sub)
+        )
 
-    if not sub_results:
+    if not sources:
         analysis.status = AIAnalysisStatus.FAILED
         analysis.error_message = "all_documents_failed"
         analysis.finished_at = datetime.utcnow()
@@ -257,8 +260,32 @@ async def analyze_case_documents(
         await session.commit()
         raise HTTPException(status_code=500, detail="ai_analysis_failed:all_documents_failed")
 
-    aggregated = aggregate_case_results(sub_results)
-    payload = aggregated.model_dump(mode="json")
+    try:
+        case_result = await pipeline_analyze_case_documents(sources)
+    except Exception as exc:  # noqa: BLE001 — provider/extraction details stay server-side
+        _log.warning(
+            "sudai_case_analysis_failed case_id=%s error_type=%s",
+            case.id,
+            type(exc).__name__,
+        )
+        analysis.status = AIAnalysisStatus.FAILED
+        analysis.error_message = _safe_analysis_error(exc)
+        analysis.finished_at = datetime.utcnow()
+        await activity_service.record_event(
+            session,
+            case_id=case.id,
+            type=ActivityType.AI_CASE_ANALYSIS_FAILED,
+            actor_id=actor.id,
+            message_key="activity.ai_case_analysis_failed",
+            meta={"documentCount": len(docs), "failures": sub_failures},
+        )
+        await session.flush()
+        await session.commit()
+        raise HTTPException(status_code=500, detail="ai_analysis_failed")
+
+    sub_failures.extend(case_result.sub_failures)
+    result = case_result.response
+    payload = result.model_dump(mode="json")
     # Carry sub-failures through so the UI can warn about missing docs.
     if sub_failures:
         payload["sub_failures"] = sub_failures
@@ -275,9 +302,9 @@ async def analyze_case_documents(
         message_key="activity.ai_case_analysis_completed",
         meta={
             "documentCount": len(docs),
-            "successfulCount": len(sub_results),
+            "successfulCount": len(docs) - len(sub_failures),
             "failedCount": len(sub_failures),
-            "confidence": aggregated.confidence_percent,
+            "confidence": result.confidence_percent,
         },
     )
     await session.flush()

@@ -615,9 +615,11 @@ function InlineUpload({ caseId }: { caseId: string }) {
         multiple
         className="hidden"
         onChange={(e) => {
-          const files = e.target.files;
-          e.target.value = '';
-          if (files?.length) addFiles(files);
+          // FileList is live: clearing the input also empties the object.
+          // Snapshot it first so the selected files actually reach the queue.
+          const files = Array.from(e.currentTarget.files ?? []);
+          e.currentTarget.value = '';
+          if (files.length > 0) addFiles(files);
         }}
       />
       <div className="flex items-center justify-between gap-3">

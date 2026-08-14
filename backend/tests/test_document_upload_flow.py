@@ -25,6 +25,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import get_settings
+from app.api.schemas.ai_analysis import AIMatchedSource
 from app.core.enums import UserRole
 from app.core.security import hash_password
 from app.db.models.case import Case
@@ -32,7 +33,10 @@ from app.db.models.ai_analysis import AIAnalysis
 from app.db.models.document import Document
 from app.db.models.user import User
 from app.main import app
-from app.services import document_service
+from app.services import ai_analyze_service, document_service
+from app.services.ai_law import case_pipeline
+from app.services.ai_law.case_synthesis import synthesize_case_locally
+from app.services.ai_law.providers import AIProviderResult
 from app.services.ocr import engine as ocr_engine_module
 
 
@@ -65,6 +69,68 @@ class _RecordingSession:
 
     async def flush(self) -> None:
         return None
+
+
+class _APIFakeCaseProvider:
+    """Two-pass remote stand-in; it never opens a network connection."""
+
+    def __init__(self) -> None:
+        self.synthesis_requests = []
+        self.reasoning_requests = []
+        self.sequence: list[str] = []
+
+    async def analyze(self, _request):
+        raise AssertionError("case API must not invoke document-level provider reasoning")
+
+    async def synthesize_case(self, request):
+        self.sequence.append("synthesis")
+        self.synthesis_requests.append(request)
+        synthesis = synthesize_case_locally(request.documents)
+        return AIProviderResult(
+            payload=synthesis.model_dump(mode="json"),
+            provider="fake_openai_compatible",
+            model="fake-case-e2e-model",
+            latency_ms=5,
+            token_usage={"total_tokens": 40},
+        )
+
+    async def analyze_case(self, request):
+        self.sequence.append("reasoning")
+        self.reasoning_requests.append(request)
+        source_id = request.legal_context[0].source_id
+        return AIProviderResult(
+            payload={
+                "primary_conclusion": (
+                    "Egalik, kirish, video, olib chiqish, sotuv, to'lov, seriya raqami "
+                    "va tan olish dalillari yagona case kontekstida o'zaro bog'langan."
+                ),
+                "explanation": "Fake remote provider trusted test source bilan reasoning bajardi.",
+                "evidence_summary": [fact.statement for fact in request.synthesis.facts],
+                "confidence_percent": 84,
+                "human_review": {
+                    "status": "xodim tasdiqlashi kerak",
+                    "recommendation": "Dalillar va huquqiy manba tekshirilsin.",
+                    "risk": "Yakuniy kvalifikatsiya inson nazoratini talab qiladi.",
+                },
+                "findings": [
+                    {
+                        "kind": "document_fact",
+                        "statement": "To'rt hujjatning faktlari birgalikda baholandi.",
+                        "source_ids": [],
+                    },
+                    {
+                        "kind": "legal_assessment",
+                        "statement": "Baholash test-only trusted criminal/property source bilan cheklangan.",
+                        "source_ids": [source_id],
+                    },
+                ],
+                "context_sufficient": True,
+            },
+            provider="fake_openai_compatible",
+            model="fake-case-e2e-model",
+            latency_ms=6,
+            token_usage={"total_tokens": 60},
+        )
 
 
 class DocumentStorageRegressionTests(unittest.IsolatedAsyncioTestCase):
@@ -291,6 +357,50 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
         ]
 
     @staticmethod
+    def _case_reasoning_files() -> list[tuple[str, bytes, str]]:
+        from docx import Document as DocxDocument
+
+        facts = [
+            (
+                "01_inventory.docx",
+                "Inventar dalolatnomasi. Tashkilotga tegishli portativ kompyuterning "
+                "seriya raqami QZ-91RT-7K. Uning balans qiymati 17 800 000 so'm. "
+                "Xodimga mulkni olib chiqish uchun ruxsat berilmagan.",
+            ),
+            (
+                "02_access_video.docx",
+                "Kirish kartasi xodimning ish vaqtidan keyin xonaga kirganini qayd etdi. "
+                "Kamera videoyozuvida xodimning qurilma bilan chiqishi ko'rinadi.",
+            ),
+            (
+                "03_buyer_payment.docx",
+                "Покупатель сообщил, что сотрудник продал устройство за 9 000 000 сум. "
+                "Оплата поступила на банковскую карту сотрудника. Серийный номер "
+                "QZ-91RT-7K совпадает с номером устройства.",
+            ),
+            (
+                "04_admission.docx",
+                "Xodim qurilmani ruxsatsiz olib chiqqanini va sotganini tan oldi. "
+                "Sotuv pulining bir qismi shaxsiy qarzlarini to'lashga sarflanganini "
+                "tasdiqladi.",
+            ),
+        ]
+        result = []
+        for filename, text in facts:
+            document = DocxDocument()
+            document.add_paragraph(text)
+            buffer = BytesIO()
+            document.save(buffer)
+            result.append(
+                (
+                    filename,
+                    buffer.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            )
+        return result
+
+    @staticmethod
     def _ocr_image_bytes(image_format: str, *, blank: bool = False) -> bytes:
         from PIL import Image, ImageDraw, ImageFont
 
@@ -480,6 +590,105 @@ class CaseDocumentSubmitIntegrationTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in first_records], [r["id"] for r in second_records])
         self.assertEqual(first_records[0]["id"], case_record["id"])
         self.assertTrue(all(record["documentId"] is None for record in first_records))
+
+    def test_four_document_case_analysis_uses_two_pass_fake_remote_provider(self) -> None:
+        headers = self._assistant_headers()
+        case_id = self._create_case(headers, "CASE-REASONING")
+        document_ids = []
+        for filename, content, content_type in self._case_reasoning_files():
+            upload = self.client.post(
+                f"/api/cases/{case_id}/documents",
+                headers=headers,
+                files={"file": (filename, content, content_type)},
+            )
+            self.assertEqual(upload.status_code, 201, upload.text)
+            document_ids.append(upload.json()["id"])
+
+        provider = _APIFakeCaseProvider()
+        trusted_source = AIMatchedSource(
+            law="Synthetic criminal property test corpus",
+            article="test-article",
+            title="Test-only trusted property source",
+            excerpt="Test fixture source for a property evidence chain.",
+            relevance=0.95,
+            source_id="api-e2e-criminal-source",
+            category_path="criminal/property/test-only",
+        )
+
+        def retrieve_after_synthesis(synthesis):
+            self.assertEqual(provider.sequence, ["synthesis"])
+            self.assertEqual(set(synthesis.document_ids), set(document_ids))
+            provider.sequence.append("retrieval")
+            return [trusted_source]
+
+        with (
+            patch.object(case_pipeline, "build_ai_provider", return_value=provider),
+            patch.object(
+                case_pipeline,
+                "retrieve_case_sources",
+                side_effect=retrieve_after_synthesis,
+            ),
+            patch.object(
+                ai_analyze_service,
+                "get_settings",
+                return_value=SimpleNamespace(sudai_provider="remote"),
+            ),
+        ):
+            response = self.client.post(f"/api/cases/{case_id}/analysis", headers=headers)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        record = response.json()
+        self.assertIsNone(record["documentId"])
+        self.assertEqual(record["provider"], "remote")
+        self.assertEqual(record["status"], "done")
+        result = record["result"]
+        self.assertEqual(provider.sequence, ["synthesis", "retrieval", "reasoning"])
+        self.assertEqual(set(result["factualSynthesis"]["documentIds"]), set(document_ids))
+        self.assertEqual(result["candidateLegalDomains"][0]["domain"], "criminal_property")
+        self.assertEqual(
+            {amount["amountType"] for amount in result["typedAmounts"]},
+            {"asset_value", "sale_price"},
+        )
+        self.assertIsNone(result["extractedObjects"]["debtAmount"])
+        self.assertTrue(result["primaryConclusion"])
+        self.assertTrue(result["evidenceSummary"])
+        self.assertTrue(
+            any("QZ-91RT-7K" in link["identifiers"] for link in result["evidenceLinks"])
+        )
+        self.assertEqual(
+            [source["categoryPath"] for source in result["matchedSources"]],
+            ["criminal/property/test-only"],
+        )
+        self.assertFalse(
+            any(
+                source["law"] in {"Oila kodeksi", "Soliq kodeksi"}
+                for source in result["matchedSources"]
+            )
+        )
+        self.assertEqual(result["technicalMetadata"]["analysisMode"], "llm")
+        self.assertEqual(result["technicalMetadata"]["provider"], "fake_openai_compatible")
+        self.assertEqual(result["technicalMetadata"]["tokenUsage"], {"total_tokens": 100})
+        self.assertTrue(result["findings"][-1]["sourceIds"][0].startswith("rag:0:"))
+
+        self.assertEqual(len(provider.synthesis_requests), 1)
+        self.assertFalse(hasattr(provider.synthesis_requests[0], "legal_context"))
+        self.assertEqual(len(provider.reasoning_requests), 1)
+        self.assertEqual(
+            set(provider.reasoning_requests[0].synthesis.document_ids), set(document_ids)
+        )
+
+        stored = asyncio.run(self._get_analysis(record["id"]))
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertIsNone(stored.document_id)
+        self.assertEqual(stored.status.value, "done")
+        self.assertEqual(
+            stored.result_json["candidate_legal_domains"][0]["domain"],
+            "criminal_property",
+        )
+        history = self.client.get(f"/api/cases/{case_id}/analysis", headers=headers)
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertEqual(history.json()["records"][0]["id"], record["id"])
 
     def test_local_ocr_e2e_for_images_and_scanned_pdf(self) -> None:
         """Real API + storage + Tesseract regression (not a mocked OCR test)."""

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
-from app.api.schemas.ai_analysis import AIMatchedSource
+from app.api.schemas.ai_analysis import AICaseFactualSynthesis, AIMatchedSource
 
 _log = logging.getLogger(__name__)
 
@@ -102,6 +102,153 @@ def retrieve_sources(
     if lexuz_sources:
         return lexuz_sources
     return _retrieve_from_demo_base(query, limit=limit)
+
+
+_CASE_STOPWORDS = {
+    "bilan",
+    "uchun",
+    "yoki",
+    "hamda",
+    "bo'lgan",
+    "bo'yicha",
+    "qilgan",
+    "mavjud",
+    "tegishli",
+    "berish",
+    "keladi",
+    "после",
+    "который",
+    "между",
+    "данный",
+    "было",
+    "была",
+    "были",
+}
+
+
+def retrieve_case_sources(
+    synthesis: AICaseFactualSynthesis,
+    limit: int = 5,
+) -> List[AIMatchedSource]:
+    """Retrieve only sources compatible with case-level candidate domains.
+
+    Unlike the historical document fallback, this path does not accept a single
+    incidental substring as sufficient evidence.  Candidate domains are an
+    explicit retrieval input and are also used to filter the returned corpus.
+    """
+    domains = [candidate.domain for candidate in synthesis.candidate_legal_domains]
+    primary_domain = domains[0] if domains else "unknown"
+    if primary_domain == "unknown":
+        return []
+
+    query_parts = [*synthesis.legal_issues, *synthesis.retrieval_terms]
+    query_parts.extend(fact.statement for fact in synthesis.facts[:8])
+    query = " ".join(part for part in query_parts if part).strip()
+    category_hint = " ".join(domains)
+
+    lexuz_sources = _retrieve_from_lexuz(
+        query,
+        limit=max(limit * 3, limit),
+        category_hint=category_hint,
+    )
+    filtered_lexuz = [
+        source
+        for source in lexuz_sources
+        if source.relevance >= 0.65 and _source_matches_domains(source, domains)
+    ]
+    if filtered_lexuz:
+        return filtered_lexuz[:limit]
+
+    return _retrieve_case_from_demo_base(query, domains=domains, limit=limit)
+
+
+def _retrieve_case_from_demo_base(
+    query: str,
+    *,
+    domains: List[str],
+    limit: int,
+) -> List[AIMatchedSource]:
+    query_tokens = _case_tokens(query)
+    scored: list[tuple[int, float, LegalChunk]] = []
+    for chunk in LEGAL_KNOWLEDGE_BASE:
+        source = AIMatchedSource(
+            law=chunk.law,
+            article=chunk.article,
+            title=chunk.title,
+            excerpt=chunk.text,
+            relevance=0,
+        )
+        if not _source_matches_domains(source, domains):
+            continue
+        keyword_hits = sum(1 for keyword in chunk.keywords if _contains_phrase(query, keyword))
+        token_score = len(query_tokens.intersection(_case_tokens(chunk.text + " " + chunk.title)))
+        score = keyword_hits * 4 + token_score
+        # One generic overlapping token must never make a legal source trusted
+        # enough for case reasoning.
+        if keyword_hits == 0 and token_score < 2:
+            continue
+        if score < 4:
+            continue
+        relevance = min(0.58 + math.log1p(score) / 4, 0.95)
+        scored.append((score, relevance, chunk))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [
+        AIMatchedSource(
+            law=chunk.law,
+            article=chunk.article,
+            title=chunk.title,
+            excerpt=chunk.text,
+            relevance=round(relevance, 2),
+        )
+        for _, relevance, chunk in scored[:limit]
+    ]
+
+
+def _source_matches_domains(source: AIMatchedSource, domains: List[str]) -> bool:
+    haystack = _normalize(
+        " ".join(
+            filter(
+                None,
+                [source.law, source.title, source.category_path or ""],
+            )
+        )
+    )
+    markers = {
+        "criminal_property": (
+            "jinoyat",
+            "жиноят",
+            "уголов",
+            "criminal",
+            "mulkka qarshi",
+        ),
+        "civil_debt": ("fuqarolik", "граждан", "civil"),
+        "family": ("oila kodeksi", "семейн", "family"),
+        "labor": ("mehnat kodeksi", "трудов", "labor"),
+        "tax": ("soliq kodeksi", "налог", "tax"),
+        "administrative": ("ma'muriy", "mamuriy", "административ", "administrative"),
+    }
+    return any(
+        any(marker in haystack for marker in markers.get(domain, ()))
+        for domain in domains
+    )
+
+
+def _case_tokens(text: str) -> Set[str]:
+    return {token for token in _tokens(text) if token not in _CASE_STOPWORDS}
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    normalized_text = _normalize(text)
+    normalized_phrase = _normalize(phrase).strip()
+    if not normalized_phrase:
+        return False
+    return bool(
+        re.search(
+            rf"(?<![\w']){re.escape(normalized_phrase)}(?![\w'])",
+            normalized_text,
+        )
+    )
 
 
 def _retrieve_from_lexuz(
@@ -257,6 +404,8 @@ def _build_search_terms(query: str, preferred_laws: List[str]) -> List[str]:
         "nikoh": ["nikoh", "ajrashish", "oila"],
         "mehnat": ["mehnat", "ish haqi", "ishga tiklash", "bo'shatish"],
         "soliq": ["soliq", "penya", "jarima", "qarzdorlik"],
+        "jinoyat": ["jinoyat", "mulkka qarshi", "o'zganing mol-mulki", "ashyoviy dalil"],
+        "mulkni ruxsatsiz": ["mulkka qarshi", "o'zganing mol-mulki", "jinoyat"],
     }
     for marker, values in keyword_map.items():
         if marker in normalized:
@@ -267,6 +416,28 @@ def _build_search_terms(query: str, preferred_laws: List[str]) -> List[str]:
 
 
 def _preferred_law_terms(query: str, category_hint: Optional[str]) -> List[str]:
+    normalized_hint = _normalize(category_hint or "")
+    explicit_terms: List[str] = []
+    explicit_domain_laws = {
+        "criminal_property": (
+            "Jinoyat kodeksi",
+            "Жиноят кодекси",
+            "Уголовный кодекс",
+        ),
+        "civil_debt": ("Fuqarolik kodeksi",),
+        "family": ("Oila kodeksi",),
+        "labor": ("Mehnat kodeksi",),
+        "tax": ("Soliq kodeksi",),
+        "administrative": ("Ma'muriy javobgarlik to'g'risidagi kodeks",),
+    }
+    for domain, laws in explicit_domain_laws.items():
+        if domain in normalized_hint:
+            explicit_terms.extend(laws)
+    if explicit_terms:
+        # Case-level candidates are deliberate retrieval hypotheses. Do not let
+        # an incidental word in a factual sentence override them before search.
+        return _dedupe_terms(explicit_terms)
+
     normalized = _normalize(f"{category_hint or ''} {query}")
     terms: List[str] = []
 
@@ -278,6 +449,11 @@ def _preferred_law_terms(query: str, category_hint: Optional[str]) -> List[str]:
         terms.append("Mehnat kodeksi")
     if "soliq" in normalized:
         terms.append("Soliq kodeksi")
+    if any(
+        word in normalized
+        for word in ["criminal_property", "jinoyat", "mulkka qarshi", "o'zganing mol-mulki"]
+    ):
+        terms.append("Jinoyat kodeksi")
 
     return _dedupe_terms(terms)
 

@@ -290,6 +290,75 @@ export interface AIAnalysisTechnicalMetadata {
   tokenUsage?: Record<string, number> | null;
 }
 
+export type AICaseAmountType =
+  | 'asset_value'
+  | 'sale_price'
+  | 'payment'
+  | 'debt'
+  | 'damage'
+  | 'salary'
+  | 'unknown';
+
+export type AICaseLegalDomain =
+  | 'criminal_property'
+  | 'civil_debt'
+  | 'family'
+  | 'labor'
+  | 'tax'
+  | 'administrative'
+  | 'unknown';
+
+export interface AICaseFact {
+  factId: string;
+  statement: string;
+  documentIds: string[];
+}
+
+export interface AICaseTimelineEvent {
+  sequence: number;
+  event: string;
+  documentIds: string[];
+}
+
+export interface AICaseEvidenceLink {
+  relationship: string;
+  documentIds: string[];
+  identifiers: string[];
+}
+
+export interface AICaseEntity {
+  label: string;
+  entityType: string;
+  documentIds: string[];
+}
+
+export interface AICaseTypedAmount {
+  amount: string;
+  currency: string;
+  amountType: AICaseAmountType;
+  context: string;
+  documentIds: string[];
+}
+
+export interface AICandidateLegalDomain {
+  domain: AICaseLegalDomain;
+  confidence: number;
+  rationale: string;
+}
+
+export interface AICaseFactualSynthesis {
+  documentIds: string[];
+  facts: AICaseFact[];
+  timeline: AICaseTimelineEvent[];
+  evidenceLinks: AICaseEvidenceLink[];
+  entities: AICaseEntity[];
+  amounts: AICaseTypedAmount[];
+  candidateLegalDomains: AICandidateLegalDomain[];
+  legalIssues: string[];
+  retrievalTerms: string[];
+  uncertainties: string[];
+}
+
 export interface AIAnalysisResult {
   metadata?: {
     documentType: string;
@@ -309,6 +378,14 @@ export interface AIAnalysisResult {
   humanReview?: AIRecommendation;
   findings?: AILegalFinding[];
   technicalMetadata?: AIAnalysisTechnicalMetadata;
+  factualSynthesis?: AICaseFactualSynthesis | null;
+  primaryConclusion?: string | null;
+  evidenceSummary?: string[];
+  timeline?: AICaseTimelineEvent[];
+  evidenceLinks?: AICaseEvidenceLink[];
+  typedAmounts?: AICaseTypedAmount[];
+  candidateLegalDomains?: AICandidateLegalDomain[];
+  uncertainties?: string[];
   /** Case-level runs surface per-document failures (lexuz missing, OCR, …) here. */
   subFailures?: { documentId: string; error: string }[];
 }

@@ -56,6 +56,14 @@ class AIWireModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, alias_generator=_camel_case)
 
 
+class AIStrictWireModel(AIWireModel):
+    """Camel-case DTO whose provider-supplied fields are strictly bounded."""
+
+    model_config = ConfigDict(
+        populate_by_name=True, alias_generator=_camel_case, extra="forbid"
+    )
+
+
 class AIDocumentMetadata(AIWireModel):
     document_type: str
     language: DocumentLanguage
@@ -138,6 +146,104 @@ class AIAnalysisTechnicalMetadata(AIWireModel):
     token_usage: Optional[dict[str, int]] = None
 
 
+# ---------------------------------------------------------------------------
+# Case-level factual synthesis
+# ---------------------------------------------------------------------------
+
+
+CaseAmountType = Literal[
+    "asset_value",
+    "sale_price",
+    "payment",
+    "debt",
+    "damage",
+    "salary",
+    "unknown",
+]
+CaseLegalDomain = Literal[
+    "criminal_property",
+    "civil_debt",
+    "family",
+    "labor",
+    "tax",
+    "administrative",
+    "unknown",
+]
+
+
+class AICaseDocumentInput(AIStrictWireModel):
+    """One bounded, anonymized document supplied to factual synthesis."""
+
+    document_id: str = Field(min_length=1)
+    filename: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
+class AICaseFact(AIStrictWireModel):
+    fact_id: str = Field(min_length=1, max_length=120)
+    statement: str = Field(min_length=1, max_length=4000)
+    document_ids: List[str] = Field(min_length=1)
+
+
+class AICaseTimelineEvent(AIStrictWireModel):
+    sequence: int = Field(ge=1)
+    event: str = Field(min_length=1, max_length=2000)
+    document_ids: List[str] = Field(min_length=1)
+
+
+class AICaseEvidenceLink(AIStrictWireModel):
+    relationship: str = Field(min_length=1, max_length=2000)
+    document_ids: List[str] = Field(min_length=2)
+    identifiers: List[str] = Field(default_factory=list)
+
+
+class AICaseEntity(AIStrictWireModel):
+    label: str = Field(min_length=1, max_length=500)
+    entity_type: str = Field(min_length=1, max_length=120)
+    document_ids: List[str] = Field(min_length=1)
+
+
+class AICaseTypedAmount(AIStrictWireModel):
+    amount: str = Field(min_length=1, max_length=200)
+    currency: str = Field(min_length=1, max_length=32)
+    amount_type: CaseAmountType
+    context: str = Field(min_length=1, max_length=1000)
+    document_ids: List[str] = Field(min_length=1)
+
+
+class AICandidateLegalDomain(AIStrictWireModel):
+    domain: CaseLegalDomain
+    confidence: float = Field(ge=0, le=1)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class AICaseFactualSynthesis(AIStrictWireModel):
+    """Facts only: no statutes, articles, citations, or provider-owned sources."""
+
+    document_ids: List[str] = Field(min_length=1)
+    facts: List[AICaseFact] = Field(default_factory=list)
+    timeline: List[AICaseTimelineEvent] = Field(default_factory=list)
+    evidence_links: List[AICaseEvidenceLink] = Field(default_factory=list)
+    entities: List[AICaseEntity] = Field(default_factory=list)
+    amounts: List[AICaseTypedAmount] = Field(default_factory=list)
+    candidate_legal_domains: List[AICandidateLegalDomain] = Field(min_length=1)
+    legal_issues: List[str] = Field(default_factory=list)
+    retrieval_terms: List[str] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
+
+
+class AICaseReasoningOutput(AIStrictWireModel):
+    """Structured second-pass output over synthesis and trusted RAG context."""
+
+    primary_conclusion: str = Field(min_length=1, max_length=8000)
+    explanation: str = Field(min_length=1, max_length=8000)
+    evidence_summary: List[str] = Field(default_factory=list)
+    confidence_percent: int = Field(ge=0, le=100)
+    human_review: AIRecommendation
+    findings: List[AILegalFinding] = Field(default_factory=list)
+    context_sufficient: bool
+
+
 class AIAnalysisResponse(AIWireModel):
     """Envelope returned by ``app.services.ai_law.pipeline.analyze_*``."""
 
@@ -154,6 +260,16 @@ class AIAnalysisResponse(AIWireModel):
     technical_metadata: AIAnalysisTechnicalMetadata = Field(
         default_factory=AIAnalysisTechnicalMetadata
     )
+    # Case-only extensions. They remain optional so the document response and
+    # persisted historical payloads keep validating unchanged.
+    factual_synthesis: Optional[AICaseFactualSynthesis] = None
+    primary_conclusion: Optional[str] = None
+    evidence_summary: List[str] = Field(default_factory=list)
+    timeline: List[AICaseTimelineEvent] = Field(default_factory=list)
+    evidence_links: List[AICaseEvidenceLink] = Field(default_factory=list)
+    typed_amounts: List[AICaseTypedAmount] = Field(default_factory=list)
+    candidate_legal_domains: List[AICandidateLegalDomain] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
 
 
 class AIReasoningOutput(AIWireModel):
