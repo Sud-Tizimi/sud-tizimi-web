@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, Button, Card, CardHeader, CardTitle } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { mergeCompletedAsrChunks, type CompletedAsrChunk } from '@/lib/liveAsrChunks';
 import { getMicrophoneIssue, getUserMediaOrThrow, toMicrophoneIssue, type MicrophoneIssue } from '@/lib/microphone';
 import type { ASRSegment, ASRTranscriptionResponse, ASRWord } from '@/types/domain';
 
@@ -26,6 +27,13 @@ const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ||
 type Mode = 'upload' | 'live' | 'local';
 type Provider = 'openrouter' | 'aistudio';
 type JobState = 'idle' | 'running' | 'done' | 'error';
+type ActiveLiveChunk = {
+  index: number;
+  offsetSec: number;
+  startedAt: number;
+  mimeType: string;
+  parts: Blob[];
+};
 type WordTooltipState = {
   key: string;
   word: ASRWord;
@@ -43,6 +51,9 @@ const PALETTE = [
   { text: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', dot: 'bg-violet-500' },
   { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', dot: 'bg-emerald-500' },
 ];
+
+const LIVE_CHUNK_MS = 30_000;
+const LIVE_RECORDER_TIMESLICE_MS = 1_000;
 
 export function Sessions() {
   const { t } = useTranslation();
@@ -70,12 +81,25 @@ export function Sessions() {
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [activeWordKey, setActiveWordKey] = useState<string | null>(null);
   const [wordTooltip, setWordTooltip] = useState<WordTooltipState>(null);
+  const [liveChunkProgress, setLiveChunkProgress] = useState({ sent: 0, completed: 0, failed: 0 });
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const chunkRecorderRef = useRef<MediaRecorder | null>(null);
+  const activeLiveChunkRef = useRef<ActiveLiveChunk | null>(null);
+  const chunkRotateTimerRef = useRef<number | null>(null);
+  const chunkFinalizationRef = useRef<Promise<void> | null>(null);
+  const chunkQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const completedChunksRef = useRef<Map<number, CompletedAsrChunk>>(new Map());
+  const mergedLiveResultRef = useRef<ASRTranscriptionResponse | null>(null);
+  const nextLiveChunkIndexRef = useRef(0);
+  const nextLiveChunkOffsetRef = useRef(0);
+  const liveRecordingActiveRef = useRef(false);
+  const liveProviderRef = useRef<Provider>('openrouter');
+  const liveLanguageRef = useRef('Uzbek');
   const rafRef = useRef<number | null>(null);
   const tooltipTimerRef = useRef<number | null>(null);
 
@@ -149,17 +173,31 @@ export function Sessions() {
     setResult(null);
     setError(null);
     setState('idle');
+    setEditing(false);
     chunksRef.current = [];
+    completedChunksRef.current.clear();
+    mergedLiveResultRef.current = null;
+    nextLiveChunkIndexRef.current = 0;
+    nextLiveChunkOffsetRef.current = 0;
+    chunkQueueRef.current = Promise.resolve();
+    setLiveChunkProgress({ sent: 0, completed: 0, failed: 0 });
     try {
       const stream = await getUserMediaOrThrow({ audio: true });
       streamRef.current = stream;
+      liveProviderRef.current = liveProvider;
+      liveLanguageRef.current = liveLanguage;
+      liveRecordingActiveRef.current = true;
+
+      // Keep an uninterrupted local master while independent 30-second files
+      // are rotated and sent to ASR in the background.
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size) chunksRef.current.push(event.data);
       };
-      recorder.start(1000);
+      recorder.start(LIVE_RECORDER_TIMESLICE_MS);
+      startLiveChunkRecorder(stream);
       setRecording(true);
       setRecordSecs(0);
       startMeter(stream);
@@ -172,24 +210,129 @@ export function Sessions() {
   }
 
   async function stopRecording() {
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
-        recorder.stop();
-      });
-    }
+    liveRecordingActiveRef.current = false;
+    setRecording(false);
+    setState('running');
+    await finalizeLiveChunk(false);
+    await stopMediaRecorder(recorderRef.current);
     const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || 'audio/webm' });
     const recorded = new File([blob], 'live-session.webm', { type: blob.type || 'audio/webm' });
     cleanupMedia();
-    setRecording(false);
     await setPlayableFile(recorded);
-    await runTranscribe(recorded, liveProvider, liveLanguage, { diarize: true });
+    await chunkQueueRef.current;
+    const finalResult = mergedLiveResultRef.current;
+    if (finalResult) {
+      setResult(finalResult);
+      setEditRows(finalResult.segments);
+      setState('done');
+    } else {
+      setState('error');
+      setError((current) => current || 'ASR failed for every recorded chunk');
+    }
+  }
+
+  function startLiveChunkRecorder(stream: MediaStream) {
+    if (!liveRecordingActiveRef.current) return;
+    const requestedMimeType = pickMimeType();
+    const recorder = new MediaRecorder(
+      stream,
+      requestedMimeType ? { mimeType: requestedMimeType } : undefined,
+    );
+    const active: ActiveLiveChunk = {
+      index: nextLiveChunkIndexRef.current,
+      offsetSec: nextLiveChunkOffsetRef.current,
+      startedAt: Date.now(),
+      mimeType: recorder.mimeType || requestedMimeType || 'audio/webm',
+      parts: [],
+    };
+    nextLiveChunkIndexRef.current += 1;
+    activeLiveChunkRef.current = active;
+    chunkRecorderRef.current = recorder;
+    recorder.ondataavailable = (event) => {
+      if (event.data.size) active.parts.push(event.data);
+    };
+    recorder.start(LIVE_RECORDER_TIMESLICE_MS);
+    chunkRotateTimerRef.current = window.setTimeout(() => {
+      void finalizeLiveChunk(true).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : 'live_chunk_failed');
+      });
+    }, LIVE_CHUNK_MS);
+  }
+
+  function finalizeLiveChunk(restart: boolean): Promise<void> {
+    if (chunkFinalizationRef.current) return chunkFinalizationRef.current;
+    const job = (async () => {
+      if (chunkRotateTimerRef.current !== null) window.clearTimeout(chunkRotateTimerRef.current);
+      chunkRotateTimerRef.current = null;
+      const recorder = chunkRecorderRef.current;
+      const active = activeLiveChunkRef.current;
+      if (!recorder || !active) return;
+      await stopMediaRecorder(recorder);
+      chunkRecorderRef.current = null;
+      activeLiveChunkRef.current = null;
+      const durationSec = Math.max(0, (Date.now() - active.startedAt) / 1000);
+      nextLiveChunkOffsetRef.current = active.offsetSec + durationSec;
+      const chunkBlob = new Blob(active.parts, { type: active.mimeType });
+
+      // Resume capture before network work begins. The master recorder never
+      // stops during rotation, so the original audio remains complete.
+      if (restart && liveRecordingActiveRef.current && streamRef.current) {
+        startLiveChunkRecorder(streamRef.current);
+      }
+      if (chunkBlob.size > 0) enqueueLiveChunk(active, chunkBlob);
+    })().finally(() => {
+      chunkFinalizationRef.current = null;
+    });
+    chunkFinalizationRef.current = job;
+    return job;
+  }
+
+  function enqueueLiveChunk(active: ActiveLiveChunk, chunkBlob: Blob) {
+    setLiveChunkProgress((current) => ({ ...current, sent: current.sent + 1 }));
+    chunkQueueRef.current = chunkQueueRef.current.then(async () => {
+      try {
+        const result = await transcribeLiveChunk(active, chunkBlob);
+        completedChunksRef.current.set(active.index, {
+          index: active.index,
+          offsetSec: active.offsetSec,
+          result,
+        });
+        const merged = mergeCompletedAsrChunks([...completedChunksRef.current.values()]);
+        mergedLiveResultRef.current = merged;
+        if (merged) {
+          setResult(merged);
+          setEditRows(merged.segments);
+        }
+        setLiveChunkProgress((current) => ({ ...current, completed: current.completed + 1 }));
+      } catch (cause) {
+        setLiveChunkProgress((current) => ({ ...current, failed: current.failed + 1 }));
+        setError(cause instanceof Error ? cause.message : 'live_chunk_failed');
+      }
+    });
+  }
+
+  async function transcribeLiveChunk(active: ActiveLiveChunk, chunkBlob: Blob) {
+    const extension = active.mimeType.includes('mp4') ? 'm4a' : active.mimeType.includes('ogg') ? 'ogg' : 'webm';
+    const form = new FormData();
+    form.append('audio', chunkBlob, `live-chunk-${String(active.index).padStart(6, '0')}.${extension}`);
+    form.append('provider', liveProviderRef.current);
+    form.append('language', liveLanguageRef.current);
+    form.append('diarize', 'true');
+    const response = await fetch(`${API_BASE}/api/asr/transcribe`, { method: 'POST', body: form });
+    if (!response.ok) throw new Error((await response.text()).slice(0, 500));
+    return (await response.json()) as ASRTranscriptionResponse;
   }
 
   function cleanupMedia() {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    if (chunkRotateTimerRef.current !== null) window.clearTimeout(chunkRotateTimerRef.current);
+    chunkRotateTimerRef.current = null;
+    liveRecordingActiveRef.current = false;
+    const chunkRecorder = chunkRecorderRef.current;
+    if (chunkRecorder && chunkRecorder.state !== 'inactive') chunkRecorder.stop();
+    chunkRecorderRef.current = null;
+    activeLiveChunkRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     recorderRef.current = null;
@@ -308,9 +451,9 @@ export function Sessions() {
 
             {mode === 'live' && (
               <div className="space-y-4">
-                <ProviderSwitch value={liveProvider} onChange={setLiveProvider} />
+                <ProviderSwitch value={liveProvider} onChange={setLiveProvider} disabled={recording} />
                 <Field label={t('asr.languageLabel')}>
-                  <input className={inputClass} value={liveLanguage} onChange={(e) => setLiveLanguage(e.target.value)} placeholder="Uzbek, English..." />
+                  <input className={inputClass} value={liveLanguage} onChange={(e) => setLiveLanguage(e.target.value)} placeholder="Uzbek, English..." disabled={recording} />
                 </Field>
                 {liveRecordingError && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-body-md text-amber-800">
@@ -324,6 +467,11 @@ export function Sessions() {
                   <AudioBars level={audioLevel} />
                   <p className="text-headline-md font-mono tabular-nums mt-3">{formatDuration(recordSecs)}</p>
                   <p className="text-body-md text-ink-muted mt-1">{t('asr.liveStopHint')}</p>
+                  {(recording || liveChunkProgress.sent > 0) && (
+                    <p className="text-body-sm text-ink-muted mt-2">
+                      {t('asr.liveChunkProgress', liveChunkProgress)}
+                    </p>
+                  )}
                   <div className="flex justify-center gap-3 mt-5">
                     {!recording ? (
                       <Button size="lg" disabled={Boolean(liveRecordingIssue)} leftIcon={<Mic className="h-4 w-4" />} onClick={() => void startRecording()}>{t('asr.liveStart')}</Button>
@@ -472,6 +620,14 @@ export function Sessions() {
   );
 }
 
+async function stopMediaRecorder(recorder: MediaRecorder | null): Promise<void> {
+  if (!recorder || recorder.state === 'inactive') return;
+  await new Promise<void>((resolve) => {
+    recorder.addEventListener('stop', () => resolve(), { once: true });
+    recorder.stop();
+  });
+}
+
 function describeMicrophoneIssue(t: (key: string) => string, issue: MicrophoneIssue): string {
   switch (issue) {
     case 'secure_context_required':
@@ -511,14 +667,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ProviderSwitch({ value, onChange }: { value: Provider; onChange: (value: Provider) => void }) {
+function ProviderSwitch({ value, onChange, disabled = false }: { value: Provider; onChange: (value: Provider) => void; disabled?: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3">
       <span className="text-mono text-ink-muted">{t('asr.provider')}</span>
       <div className="inline-flex rounded-md border border-outline-soft bg-surface-container p-0.5">
         {(['openrouter', 'aistudio'] as Provider[]).map((provider) => (
-          <button key={provider} type="button" onClick={() => onChange(provider)} className={cn('h-8 px-3 rounded text-caption font-medium transition-colors', value === provider ? 'bg-white text-primary-600 shadow-soft' : 'text-ink-muted hover:text-ink')}>
+          <button key={provider} type="button" disabled={disabled} onClick={() => onChange(provider)} className={cn('h-8 px-3 rounded text-caption font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60', value === provider ? 'bg-white text-primary-600 shadow-soft' : 'text-ink-muted hover:text-ink')}>
             {provider === 'openrouter' ? t('asr.providerOpenRouter') : t('asr.providerAiStudio')}
           </button>
         ))}
